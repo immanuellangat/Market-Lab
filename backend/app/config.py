@@ -54,4 +54,4 @@ TARGETS_R = (1.0, 2.0, 3.0)
 OOS_FRACTION = 0.30
 
 # Bump to invalidate cached feature files after detector changes.
-FEATURE_VERSION = 3
+FEATURE_VERSION = 4

@@ -113,6 +113,7 @@ function SignalCard({ s }: { s: Signal }) {
           <span className={`chip ${long ? 'bull' : 'bear'}`} style={{ fontWeight: 600 }}>{long ? 'BUY' : 'SELL'}</span>
           <b>{s.symbol} {s.tf}</b>
           <span className="muted">{p.name}</span>
+          {p.unproven && <span className="chip warn" title="No statistically confirmed edge yet: this signal is part of a forward test.">unproven</span>}
           <span className="grow" />
           <span className={`chip ${statusCls}`}>{s.status === 'open' ? 'open' : `${s.status} ${fmt.r(s.result_r)}`}</span>
           <span className="small faint" title={fmt.date(s.bar_time) + ' UTC'}>{ago(s.detected_at)}</span>
@@ -120,8 +121,8 @@ function SignalCard({ s }: { s: Signal }) {
 
         <div className="levels num">
           <div><span className="muted">Entry ≈</span> {fmt.price(s.entry)}<div className="faint small">next candle open</div></div>
-          <div><span className="muted">Stop</span> <span className="neg">{fmt.price(s.stop)}</span><div className="faint small">{p.stop_atr}× ATR</div></div>
-          <div><span className="muted">Target</span> <span className="pos">{fmt.price(s.target)}</span><div className="faint small">{p.target_r}R</div></div>
+          <div><span className="muted">Stop</span> <span className="neg">{fmt.price(s.stop)}</span><div className="faint small">{p.stop_text ?? `${p.stop_atr}× ATR`}</div></div>
+          <div><span className="muted">Target</span> <span className="pos">{fmt.price(s.target)}</span><div className="faint small">{p.target_text ?? `${p.target_r}R`}</div></div>
           {p.liquidity_targets.slice(0, 2).map((t, k) => (
             <div key={k}><span className="muted">Liquidity</span> {fmt.price(t.price)}<div className="faint small">{t.kind} · {fmt.num(t.rr, 1)}R</div></div>
           ))}
@@ -191,9 +192,10 @@ function WatchlistPanel({ watches, busy, act }: { watches: Watch[]; busy: string
           return (
             <div key={w.id} className="zone-card" style={{ cursor: 'default', opacity: w.active ? 1 : 0.55 }}>
               <div className="row">
-                <span className={`chip ${w.direction === 'long' ? 'bull' : 'bear'}`}>{w.direction === 'long' ? 'BUY' : 'SELL'}</span>
+                <span className={`chip ${w.direction === 'long' ? 'bull' : w.direction === 'short' ? 'bear' : 'accent'}`}>{w.direction === 'long' ? 'BUY' : w.direction === 'short' ? 'SELL' : 'BUY/SELL'}</span>
                 <b style={{ fontSize: 13 }}>{w.symbol} {w.tf}</b>
                 <span className="grow" />
+                {w.conditions[0]?.startsWith('strategy:') && <span className="chip warn" title="Forward test: no statistically confirmed edge yet">unproven</span>}
                 {ev && <span className="chip">Grade {ev.grade}</span>}
               </div>
               <div className="small muted">{w.name}</div>

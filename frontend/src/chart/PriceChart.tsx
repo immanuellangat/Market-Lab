@@ -3,11 +3,11 @@ import {
   CandlestickSeries, ColorType, CrosshairMode, LineSeries, LineStyle, LineType, createChart, createSeriesMarkers,
   type IChartApi, type ISeriesApi, type ISeriesMarkersPluginApi, type SeriesMarker, type Time, type UTCTimestamp,
 } from 'lightweight-charts'
-import type { Bars, KeyZones, Overlays, TradeZone } from '../api'
+import type { Bars, KeyZones, Overlays, QuickStats, TradeZone, Zone } from '../api'
 import { TZ_LABEL, TZ_OFFSET, fmt } from '../state'
 import { OverlayPrimitive, type Rect, type Seg } from './overlayPrimitive'
 
-export interface Layers { fvg: boolean; ob: boolean; structure: boolean; swings: boolean; liquidity: boolean; levels: boolean; zones: boolean }
+export interface Layers { fvg: boolean; ob: boolean; spent: boolean; structure: boolean; swings: boolean; liquidity: boolean; levels: boolean; zones: boolean }
 
 interface Props {
   bars: Bars | null
@@ -21,6 +21,8 @@ interface Props {
   theme: string
   /** the still-forming candle from MT5 (display only) */
   liveBar?: { time: number; open: number; high: number; low: number; close: number } | null
+  /** historical first-retest record per zone type (fvg_bull, ob_bear, ...) for tooltips */
+  zoneStats?: Record<string, QuickStats> | null
   onBarClick?: (globalIndex: number) => void
 }
 
@@ -40,7 +42,7 @@ const alpha = (hex: string, a: number) => {
   return `rgba(${n >> 16},${(n >> 8) & 255},${n & 255},${a})`
 }
 
-export default function PriceChart({ bars, showCount, overlays, layers, keyZones, selectedZone, marker, theme, liveBar, onBarClick }: Props) {
+export default function PriceChart({ bars, showCount, overlays, layers, keyZones, selectedZone, marker, theme, liveBar, zoneStats, onBarClick }: Props) {
   const box = useRef<HTMLDivElement>(null)
   const chart = useRef<IChartApi | null>(null)
   const candles = useRef<ISeriesApi<'Candlestick'> | null>(null)
@@ -50,6 +52,8 @@ export default function PriceChart({ bars, showCount, overlays, layers, keyZones
   const clickRef = useRef(onBarClick)
   const barsRef = useRef(bars)
   const [legend, setLegend] = useState<string>('')
+  const [hover, setHover] = useState<{ zone: Zone; x: number; y: number } | null>(null)
+  const zoneById = useRef<Record<string, Zone>>({})
   clickRef.current = onBarClick
   barsRef.current = bars
 
@@ -78,6 +82,9 @@ export default function PriceChart({ bars, showCount, overlays, layers, keyZones
     })
     c.subscribeCrosshairMove(p => {
       const b = barsRef.current
+      const hitId = p.point ? prim.current.hitTestAt(p.point.x, p.point.y) : null
+      const hz = hitId ? zoneById.current[hitId] : undefined
+      setHover(hz && p.point ? { zone: hz, x: p.point.x, y: p.point.y } : null)
       if (!b || p.logical === undefined || p.logical === null) { setLegend(''); return }
       const i = Math.round(p.logical)
       if (i < 0 || i >= b.time.length) { setLegend(''); return }
@@ -147,20 +154,28 @@ export default function PriceChart({ bars, showCount, overlays, layers, keyZones
     const timeOf = (g: number) => ct(bars.time[Math.max(0, Math.min(L(g), last))])
 
     if (overlays) {
-      for (const z of overlays.zones) {
+      const byId: Record<string, Zone> = {}
+      overlays.zones.forEach((z, k) => {
         const isFvg = z.kind.startsWith('fvg')
-        if ((isFvg && !layers.fvg) || (!isFvg && !layers.ob)) continue
-        if (z.end !== null && z.end < off) continue
+        if ((isFvg && !layers.fvg) || (!isFvg && !layers.ob)) return
+        if (z.end !== null && z.end < off) return
+        const fresh = z.end === null
+        if (!fresh && !layers.spent) return
         const bull = z.kind.endsWith('bull')
         const col = bull ? t.bull : t.bear
+        const id = `z${k}`
+        byId[id] = z
+        // order blocks: solid border; FVGs: dashed border. Green = bullish, red = bearish.
         rects.push({
-          l1: L(z.start), l2: z.end === null ? L(last) + 0.5 : L(z.end),
+          l1: L(z.start), l2: fresh ? last + 0.5 : L(z.end!),
           top: z.top, bottom: z.bottom,
-          fill: alpha(isFvg ? col : t.accent, z.end === null ? 0.16 : 0.07),
-          stroke: z.end === null ? alpha(isFvg ? col : t.accent, 0.55) : undefined,
-          label: z.end === null ? (isFvg ? 'FVG' : 'OB') : undefined,
+          fill: alpha(col, fresh ? (isFvg ? 0.12 : 0.18) : 0.05),
+          stroke: alpha(col, fresh ? (isFvg ? 0.65 : 0.9) : 0.25),
+          dash: isFvg,
+          label: fresh ? (isFvg ? 'FVG' : 'OB') : undefined, labelColor: col, id,
         })
-      }
+      })
+      zoneById.current = byId
       if (layers.structure) {
         for (const e of overlays.events) {
           if (e.i < off) continue
@@ -182,7 +197,7 @@ export default function PriceChart({ bars, showCount, overlays, layers, keyZones
         }
         for (const p of overlays.pools) {
           if (p.end !== null && p.end < off) continue
-          segs.push({ l1: L(Math.max(p.start, off)), l2: p.end === null ? L(last) : L(p.end), price: p.level, color: alpha(t.warn, 0.9),
+          segs.push({ l1: L(Math.max(p.start, off)), l2: p.end === null ? last : L(p.end), price: p.level, color: alpha(t.warn, 0.9),
             dash: true, label: p.kind === 'eqh' ? 'EQH' : 'EQL' })
         }
       }
@@ -237,7 +252,46 @@ export default function PriceChart({ bars, showCount, overlays, layers, keyZones
   return (
     <div className="chart-wrap">
       <div className="chart-legend num">{legend}</div>
+      {hover && bars && <ZoneTip h={hover} bars={bars} stats={zoneStats?.[hover.zone.kind]} />}
       <div ref={box} className="chart-box" />
+    </div>
+  )
+}
+
+const STATUS_TIP: Record<string, string> = {
+  fresh: 'price has not returned yet',
+  'partly filled': 'price has entered the gap but not filled it',
+  tapped: 'spent: price returned into it',
+  filled: 'spent: the gap was filled',
+  broken: 'spent: a candle closed through it',
+  expired: 'spent: too old',
+}
+
+function ZoneTip({ h, bars, stats }: { h: { zone: Zone; x: number; y: number }; bars: Bars; stats?: QuickStats }) {
+  const z = h.zone
+  const isFvg = z.kind.startsWith('fvg')
+  const bull = z.kind.endsWith('bull')
+  const i = z.formed - bars.first_index
+  const atr = i >= 0 && i < bars.atr.length ? bars.atr[i] : null
+  const t = (g: number) => {
+    const k = g - bars.first_index
+    return k >= 0 && k < bars.time.length ? fmt.local(bars.time[k]) : 'earlier'
+  }
+  const fresh = z.end === null
+  return (
+    <div className="zone-tip" style={{ left: h.x + 16, top: Math.max(4, h.y - 10) }}>
+      <div className="row" style={{ gap: 6 }}>
+        <b style={{ color: bull ? 'var(--bull)' : 'var(--bear)' }}>{bull ? 'Bullish' : 'Bearish'} {isFvg ? 'FVG' : 'order block'}</b>
+        <span className={`chip ${fresh ? 'bull' : ''}`}>{z.status}</span>
+      </div>
+      <div className="muted">{STATUS_TIP[z.status] ?? ''}{!fresh && ` (${t(z.end!)})`}</div>
+      <div className="num">Formed {t(z.formed)} · {fmt.price(z.bottom)}–{fmt.price(z.top)}{atr ? ` · ${((z.top - z.bottom) / atr).toFixed(1)} ATR tall` : ''}</div>
+      {stats && stats.n > 0 && (
+        <div className="num" style={{ marginTop: 4 }}>
+          History ({bars.symbol} {bars.tf}): {fmt.int(stats.n)} first retests · win {fmt.pct(stats.win_rate, 0)} ·{' '}
+          <span className={(stats.avg_r ?? 0) >= 0 ? 'pos' : 'neg'}>{fmt.r(stats.avg_r)}</span> (unseen {fmt.r(stats.oos_avg_r)}) · grade {stats.grade}
+        </div>
+      )}
     </div>
   )
 }

@@ -14,11 +14,11 @@ export interface Meta {
 
 export interface Bars {
   symbol: string; tf: string; first_index: number; total: number
-  time: number[]; open: number[]; high: number[]; low: number[]; close: number[]; volume: number[]
+  time: number[]; open: number[]; high: number[]; low: number[]; close: number[]; volume: number[]; atr: (number | null)[]
   levels: Record<string, (number | null)[]>
 }
 
-export interface Zone { kind: string; start: number; formed: number; end: number | null; top: number; bottom: number }
+export interface Zone { kind: string; start: number; formed: number; end: number | null; top: number; bottom: number; status: string }
 export interface Swing { i: number; conf: number; price: number; kind: string; side: 'high' | 'low' }
 export interface StructEvent { i: number; kind: string; level: number; ref_i: number }
 export interface Pool { kind: 'eqh' | 'eql'; start: number; end: number | null; level: number }
@@ -101,6 +101,7 @@ export const api = {
   bars: (symbol: string, tf: string, count: number, end_index?: number) => req<Bars>(`/api/bars?${qs({ symbol, tf, count, end_index })}`),
   indexOf: (symbol: string, tf: string, time: number) => req<{ index: number; total: number }>(`/api/index_of?${qs({ symbol, tf, time })}`),
   overlays: (symbol: string, tf: string, from_i: number, to_i: number) => req<Overlays>(`/api/overlays?${qs({ symbol, tf, from_i, to_i })}`),
+  zoneStats: (symbol: string, tf: string) => req<Record<string, QuickStats>>(`/api/zone_stats?${qs({ symbol, tf })}`),
   zones: (symbol: string, tf: string, at_index?: number) => req<KeyZones>(`/api/zones?${qs({ symbol, tf, at_index })}`),
   barContext: (symbol: string, tf: string, index: number) =>
     req<{ index: number; time: number; conditions: { id: string; label: string; category: string; bias: Bias }[] }>(`/api/bar_context?${qs({ symbol, tf, index })}`),
@@ -115,13 +116,14 @@ export interface WatchStats {
   evidence: Evidence; decay: Decay | null; split_time: number; as_of: number
 }
 export interface Watch {
-  id: number; created: number; name: string; symbol: string; tf: string; direction: 'long' | 'short'
+  id: number; created: number; name: string; symbol: string; tf: string; direction: 'long' | 'short' | 'both'
   conditions: string[]; target_r: number; stop_atr: number; cooldown: number; active: number; plan?: string | null
   stats: WatchStats | null; stats_updated: number
   record?: { signals: number; open: number; wins: number; losses: number; avg_r: number | null; total_r: number }
 }
 export interface SignalPayload {
-  name: string; conditions: string[]; condition_labels: string[]; target_r: number; stop_atr: number; atr: number
+  name: string; conditions: string[]; condition_labels: string[]; target_r: number; stop_atr: number | null; atr: number
+  strategy?: string; stop_text?: string; target_text?: string; unproven?: boolean
   liquidity_targets: Level[]; context: { id: string; label: string; category: string; bias: Bias }[]
   stats: WatchStats['stats'] | null; evidence: Evidence | null; decay: Decay | null; stats_as_of: number | null
   similar: { k: number; of: number; win_rate: number; avg_r: number; all_avg_r: number; mean_similarity: number;

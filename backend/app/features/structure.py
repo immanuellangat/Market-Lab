@@ -203,7 +203,7 @@ def add_structure(df: pd.DataFrame, k: int = 3) -> tuple[pd.DataFrame, Records]:
                     if l[i] <= z["top"]:
                         F["in_bull_fvg"][i] = True
                         if not z["touched"]:
-                            z["touched"] = True
+                            z["touched"], z["touch_i"] = True, i
                             if c[i] >= z["bottom"]:
                                 F["fvg_bull_retest"][i] = True
                     dead = l[i] <= z["bottom"] or c[i] < z["bottom"]
@@ -211,7 +211,7 @@ def add_structure(df: pd.DataFrame, k: int = 3) -> tuple[pd.DataFrame, Records]:
                     if h[i] >= z["bottom"]:
                         F["in_bear_fvg"][i] = True
                         if not z["touched"]:
-                            z["touched"] = True
+                            z["touched"], z["touch_i"] = True, i
                             if c[i] <= z["top"]:
                                 F["fvg_bear_retest"][i] = True
                     dead = h[i] >= z["top"] or c[i] > z["top"]

@@ -187,3 +187,6 @@ table.t td.r, table.t th.r { text-align: right; }
 .grade-chip.A, .grade-chip.B { background: var(--bull-soft); color: var(--bull); }
 .grade-chip.C { background: var(--warn-soft); color: var(--warn); }
 .grade-chip.D, .grade-chip.F { background: var(--bear-soft); color: var(--bear); }
+
+.zone-tip { position: absolute; z-index: 5; pointer-events: none; max-width: 360px; background: var(--panel); border: 1px solid var(--border);
+  border-radius: 8px; padding: 8px 10px; font-size: 12px; line-height: 1.5; box-shadow: 0 8px 24px rgba(0, 0, 0, 0.35); }

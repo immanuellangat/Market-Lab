@@ -38,6 +38,8 @@ def levels_for_entry(spec: dict, entry: float) -> tuple[float, float | None]:
     sg = 1 if long else -1
     a = spec["atr"]
     st = spec["stop"]
+    if st["mode"] == "fixed":  # named strategies: price levels fixed by the setup itself
+        return st["level"], spec["target"]["level"]
     if st["mode"] == "struct":
         d = float(np.clip((entry - st["level"]) * sg, 0.5 * a, 3 * a))
     else:

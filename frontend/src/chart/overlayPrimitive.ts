@@ -5,7 +5,7 @@ import type {
 import type { CanvasRenderingTarget2D } from 'fancy-canvas'
 
 /** x positions are *logical* bar indexes into the series data; 'right' extends to the pane edge. */
-export interface Rect { l1: number; l2: number | 'right'; top: number; bottom: number; fill: string; stroke?: string; label?: string; labelColor?: string }
+export interface Rect { l1: number; l2: number | 'right'; top: number; bottom: number; fill: string; stroke?: string; dash?: boolean; label?: string; labelColor?: string; id?: string }
 export interface Seg { l1: number; l2: number | 'right'; price: number; color: string; dash?: boolean; width?: number; label?: string }
 export interface Shapes { rects: Rect[]; segs: Seg[] }
 
@@ -19,12 +19,22 @@ class Renderer implements IPrimitivePaneRenderer {
     if (!chart || !series) return
     const ts = chart.timeScale()
     const { rects, segs } = this.src.shapes
+    const hits: { id: string; x1: number; x2: number; y1: number; y2: number }[] = []
     target.useBitmapCoordinateSpace(scope => {
       const ctx = scope.context
       const hr = scope.horizontalPixelRatio
       const vr = scope.verticalPixelRatio
       const W = scope.bitmapSize.width
-      const x = (l: number | 'right') => (l === 'right' ? W : (ts.logicalToCoordinate(l as never) ?? NaN) * hr)
+      // logicalToCoordinate only handles whole bar indexes (fractions return 0), so interpolate between bars
+      const lc = (l: number) => {
+        const f = Math.floor(l)
+        const a = ts.logicalToCoordinate(f as never)
+        if (a === null) return NaN
+        if (l === f) return a
+        const b = ts.logicalToCoordinate((f + 1) as never)
+        return b === null ? a : a + (b - a) * (l - f)
+      }
+      const x = (l: number | 'right') => (l === 'right' ? W : lc(l) * hr)
       ctx.font = `${Math.round(10 * vr)}px system-ui, sans-serif`
       ctx.textBaseline = 'top'
 
@@ -39,8 +49,11 @@ class Renderer implements IPrimitivePaneRenderer {
         if (r.stroke) {
           ctx.strokeStyle = r.stroke
           ctx.lineWidth = Math.max(1, hr)
+          ctx.setLineDash(r.dash ? [4 * hr, 3 * hr] : [])
           ctx.strokeRect(x1, top, x2 - x1, h)
+          ctx.setLineDash([])
         }
+        if (r.id) hits.push({ id: r.id, x1: Math.min(x1, x2) / hr, x2: Math.max(x1, x2) / hr, y1: top / vr, y2: (top + h) / vr })
         if (r.label && x2 - x1 > 40 * hr) {
           ctx.fillStyle = r.labelColor ?? r.stroke ?? '#999'
           ctx.fillText(r.label, Math.max(x1, 0) + 4 * hr, top + 2 * vr)
@@ -68,6 +81,7 @@ class Renderer implements IPrimitivePaneRenderer {
         }
       }
     })
+    this.src.hits = hits
   }
 }
 
@@ -82,6 +96,15 @@ export class OverlayPrimitive implements ISeriesPrimitive<Time> {
   chart: IChartApi | null = null
   series: ISeriesApi<SeriesType> | null = null
   shapes: Shapes = { rects: [], segs: [] }
+  /** last drawn rectangles in CSS pixels, for hover hit-testing (topmost = last drawn) */
+  hits: { id: string; x1: number; x2: number; y1: number; y2: number }[] = []
+  hitTestAt(x: number, y: number): string | null {
+    for (let k = this.hits.length - 1; k >= 0; k--) {
+      const h = this.hits[k]
+      if (x >= h.x1 && x <= h.x2 && y >= h.y1 && y <= h.y2) return h.id
+    }
+    return null
+  }
   private requestUpdate: (() => void) | null = null
   private views = [new PaneView(this)]
 

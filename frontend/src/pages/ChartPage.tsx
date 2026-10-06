@@ -1,10 +1,10 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { api, live, type Bars, type Bias, type KeyZones, type Overlays, type TradeZone } from '../api'
+import { api, live, type Bars, type Bias, type KeyZones, type Overlays, type QuickStats, type TradeZone } from '../api'
 import PriceChart, { type Layers } from '../chart/PriceChart'
 import { TZ_LABEL, fmt, useApp } from '../state'
 
 const LAYER_LABELS: [keyof Layers, string][] = [
-  ['zones', 'Trade zones'], ['fvg', 'FVG'], ['ob', 'Order blocks'], ['structure', 'BOS / CHoCH'],
+  ['zones', 'Trade zones'], ['fvg', 'FVG'], ['ob', 'Order blocks'], ['spent', 'Spent zones'], ['structure', 'BOS / CHoCH'],
   ['liquidity', 'Liquidity'], ['swings', 'Swings'], ['levels', 'PDH/PDL · Asia'],
 ]
 const WINDOW = 4000      // bars loaded for normal browsing
@@ -18,7 +18,7 @@ export default function ChartPage({ theme }: { theme: string }) {
   const [selZone, setSelZone] = useState<TradeZone | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [loading, setLoading] = useState(false)
-  const [layers, setLayers] = useState<Layers>({ zones: true, fvg: true, ob: true, structure: true, liquidity: true, swings: false, levels: true })
+  const [layers, setLayers] = useState<Layers>({ zones: true, fvg: true, ob: true, spent: false, structure: true, liquidity: true, swings: false, levels: true })
   // replay: `cursor` is the last visible global bar index
   const [replay, setReplay] = useState(false)
   const [cursor, setCursor] = useState<number | null>(null)
@@ -27,6 +27,9 @@ export default function ChartPage({ theme }: { theme: string }) {
   const [marker, setMarker] = useState<{ index: number; text: string; dir?: string } | null>(null)
   const [inspect, setInspect] = useState<{ index: number; time: number; conditions: { id: string; label: string; category: string; bias: Bias }[] } | null>(null)
   const [pickStart, setPickStart] = useState(false)
+
+  const [zoneStats, setZoneStats] = useState<Record<string, QuickStats> | null>(null)
+  useEffect(() => { setZoneStats(null); api.zoneStats(symbol, tf).then(setZoneStats).catch(() => {}) }, [symbol, tf])
 
   const lastIndex = bars ? bars.first_index + bars.time.length - 1 : 0
   const visibleEnd = replay && cursor !== null ? cursor : lastIndex
@@ -168,7 +171,7 @@ export default function ChartPage({ theme }: { theme: string }) {
       <div className="chart-layout">
         <div className="panel" style={{ display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
           <PriceChart bars={bars} showCount={showCount} overlays={overlays} layers={layers} keyZones={zones}
-            selectedZone={selZone} marker={marker} theme={theme} liveBar={liveBar} onBarClick={onBarClick} />
+            selectedZone={selZone} marker={marker} theme={theme} liveBar={liveBar} zoneStats={zoneStats} onBarClick={onBarClick} />
           <div className="replay-bar">
             {!replay && !pickStart && <button className="btn sm" onClick={startReplay} disabled={!bars}>▶ Replay from a bar…</button>}
             {pickStart && <><span className="chip accent">Click the bar where replay should start</span><button className="btn sm ghost" onClick={() => setPickStart(false)}>Cancel</button></>}

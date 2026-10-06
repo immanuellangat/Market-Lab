@@ -27,6 +27,7 @@ from ..research.outcomes import get_outcomes, spread_price
 from ..research.zones import _liquidity
 from ..execution.levels import levels_for_entry, signal_spec
 from ..execution.simulate import BASELINE, Plan, simulate
+from ..strategies import crt, live as strat
 from . import db, notify
 
 TICK_SECONDS = 10
@@ -41,6 +42,8 @@ def _unix(ts) -> int:
 
 def snapshot_stats(w: dict) -> dict:
     """Historical evidence for a watched setup, stored with it and refreshed daily."""
+    if strat.is_strategy(w):
+        return strat.snapshot_stats(w)
     res = run_test(w["symbol"], w["tf"], w["conditions"], w["direction"], w["target_r"], w["stop_atr"],
                    cooldown=w["cooldown"], max_examples=0)
     return {k: res.get(k) for k in ("stats", "evidence", "decay", "split_time", "params")} | {"as_of": int(time.time())}
@@ -152,6 +155,9 @@ class LiveService:
             bar_time = _unix(df["time"].iloc[last])
             created = []
             for w in watches:
+                if strat.is_strategy(w):
+                    created += self._scan_strategy(w, force)
+                    continue
                 try:
                     hit = bool(evaluate(df, w["conditions"])[last])
                 except KeyError as e:
@@ -170,6 +176,97 @@ class LiveService:
                 if sid:
                     created.append(sid)
             return created
+
+    def _scan_strategy(self, w: dict, force: bool = False) -> list[int]:
+        if w["plan"].startswith("smc|"):
+            return self._scan_smc(w, force)
+        try:
+            hits = strat.check_latest(w)
+        except Exception as e:
+            self._log(f"watch #{w['id']} ({w['name']}) failed: {e}")
+            return []
+        out = []
+        for e in hits:
+            if "skip" in e:
+                self._log(f"watch #{w['id']}: CRT {e['direction']} on {w['symbol']} skipped ({e['skip']})")
+                continue
+            prev = db.last_signal_time(w["id"])
+            if prev is not None and prev >= e["bar_time"] and not force:
+                continue
+            sid = self._make_strategy_signal(w, e)
+            if sid:
+                out.append(sid)
+        return out
+
+    def _scan_smc(self, w: dict, force: bool = False) -> list[int]:
+        try:
+            hits = strat.smc_check_latest(w)
+        except Exception as e:
+            self._log(f"watch #{w['id']} ({w['name']}) failed: {e}")
+            return []
+        out = []
+        stats = w.get("stats") or {}
+        for e in hits:
+            prev = db.last_signal_time(w["id"])
+            if prev is not None and prev >= e["bar_time"] and not force:
+                continue
+            stop, target = levels_for_entry(e["spec"], e["close"])
+            rr = abs(target - e["close"]) / abs(e["close"] - stop)
+            payload = {
+                "name": w["name"], "strategy": "SMC", "conditions": w["conditions"],
+                "condition_labels": ["liquidity sweep", "CHoCH / MSS", "FVG / OB retest"]
+                                    + [strat.SMC_FILTER_TEXT[f] for f in strat._smc_parse(w["plan"])["filters"]],
+                "target_r": round(rr, 2), "stop_atr": None, "atr": e["atr"],
+                "stop_text": "beyond the 10-bar swing", "target_text": f"{rr:.1f}R",
+                "spec": e["spec"], "plan": w["plan"], "plan_text": w["name"],
+                "liquidity_targets": [], "context": [],
+                "stats": stats.get("stats"), "evidence": stats.get("evidence"), "decay": stats.get("decay"),
+                "stats_as_of": stats.get("as_of"), "similar": None, "unproven": True,
+            }
+            s = {"watch_id": w["id"], "symbol": w["symbol"], "tf": w["tf"], "direction": e["direction"],
+                 "bar_time": e["bar_time"], "entry": e["close"], "stop": stop, "target": target, "payload": payload}
+            sid = db.add_signal(s)
+            if sid is None:
+                continue
+            out.append(sid)
+            self._log(f"SIGNAL #{sid}: {e['direction'].upper()} {w['symbol']} {w['tf']} — {w['name']}")
+            if notify.configured():
+                try:
+                    notify.send(notify.format_signal(s))
+                except Exception as ex:
+                    self._log(f"telegram failed: {ex}")
+        return out
+
+    def _make_strategy_signal(self, w: dict, e: dict) -> int | None:
+        stats = w.get("stats") or {}
+        r = strat.parse(w["plan"])
+        spec = {"plan": w["plan"], "manage": "none", "atr": e["atr"], "direction": e["direction"],
+                "stop": {"mode": "fixed", "level": e["stop"]}, "target": {"mode": "fixed", "level": e["target"]}}
+        payload = {
+            "name": w["name"], "strategy": "CRT", "conditions": w["conditions"],
+            "condition_labels": [f"CRT {r['htf']} {'swept high' if e['direction'] == 'short' else 'swept low'}"]
+                                + [strat.FILTER_TEXT[f] for f in r["filters"]],
+            "target_r": round(e["rr"], 2), "stop_atr": None, "atr": e["atr"],
+            "stop_text": "beyond the sweep wick", "target_text": f"other side of the range · {e['rr']:.1f}R",
+            "range": e["range"], "sweep": e["sweep"],
+            "spec": spec, "plan": w["plan"], "plan_text": crt.describe(r["htf"], "close"),
+            "liquidity_targets": [], "context": [],
+            "stats": stats.get("stats"), "evidence": stats.get("evidence"), "decay": stats.get("decay"),
+            "stats_as_of": stats.get("as_of"), "similar": None,
+            "unproven": True,
+        }
+        s = {"watch_id": w["id"], "symbol": w["symbol"], "tf": r["htf"], "direction": e["direction"],
+             "bar_time": e["bar_time"], "entry": e["entry"], "stop": e["stop"], "target": e["target"], "payload": payload}
+        sid = db.add_signal(s)
+        if sid is None:
+            return None
+        self._log(f"SIGNAL #{sid}: {e['direction'].upper()} {w['symbol']} {r['htf']} — {w['name']}")
+        if notify.configured():
+            try:
+                notify.send(notify.format_signal(s))
+            except Exception as ex:
+                self._log(f"telegram failed: {ex}")
+        return sid
 
     def scan_all(self) -> int:
         n = 0
@@ -225,7 +322,7 @@ class LiveService:
         sid = db.add_signal(s)
         if sid is None:
             return None
-        self._log(f"SIGNAL #{sid}: {w['direction'].upper()} {w['symbol']} {w['tf']} — {w['name']}")
+        self._log(f"SIGNAL #{sid}: {w['direction'].upper()} {w['symbol']} {w['tf']} â€” {w['name']}")
         if notify.configured():
             try:
                 notify.send(notify.format_signal(s))
@@ -288,6 +385,9 @@ class LiveService:
             "plan": BASELINE.key, "manage": "none", "atr": p["atr"], "direction": s["direction"],
             "stop": {"mode": "atr", "k": p["stop_atr"]}, "target": {"mode": "r", "k": p["target_r"]}}
         stop, target = levels_for_entry(spec, entry)
+        if (entry - stop) * (1 if s["direction"] == "long" else -1) <= 0:  # opened beyond the stop: never filled
+            db.close_signal(s["id"], "timeout", 0.0, _unix(after["time"].iloc[0]))
+            return
         cost = float(spread_price(bars.iloc[i: i + 1], point_size(s["symbol"]))[0])
         h, l, c = (after[k].to_numpy(float) for k in ("high", "low", "close"))
         r, held, reason = simulate(h, l, c, s["direction"], entry, stop, target, spec["manage"], spec["atr"], cost)

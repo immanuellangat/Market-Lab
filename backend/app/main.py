@@ -37,4 +37,7 @@ if DIST.exists():
 
     @app.get("/{path:path}")
     def spa(path: str):
+        f = (DIST / path).resolve()
+        if path and f.is_file() and DIST.resolve() in f.parents:  # icons, manifest, favicon
+            return FileResponse(f)
         return FileResponse(DIST / "index.html")

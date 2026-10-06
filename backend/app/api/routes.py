@@ -13,6 +13,7 @@ from ..data import store
 from ..data.mt5_source import MT5Error, source
 from ..features import engine
 from ..features.sessions import SESSIONS
+from ..features.structure import FVG_EXPIRY, OB_EXPIRY
 from ..research.conditions import CATALOG
 from ..research.hypothesis import run_test
 from ..research.zones import key_zones
@@ -142,6 +143,7 @@ def bars(symbol: str, tf: str, count: int = 3000, end_index: int | None = None):
         "time": t.tolist(), "open": d["open"].round(6).tolist(), "high": d["high"].round(6).tolist(),
         "low": d["low"].round(6).tolist(), "close": d["close"].round(6).tolist(),
         "volume": d["volume"].tolist(),
+        "atr": [_f(v) for v in d["atr"].to_numpy()],
         "levels": {k: [_f(v) for v in d[k].to_numpy()] for k in ("pdh", "pdl", "asia_high", "asia_low") if k in d},
     }
 
@@ -167,14 +169,22 @@ def overlays(symbol: str, tf: str, from_i: int, to_i: int):
     for z in rec.zones:
         if not visible(z):
             continue
+        is_ob = z["kind"].startswith("ob")
         end = z["end"] if z["end"] is not None and z["end"] <= to_i else None
         t = z.get("touch_i")
-        if z["kind"].startswith("ob") and t is not None and t <= to_i:
-            end = t if end is None else min(end, t)  # an order block is spent once tapped
-            if end < from_i:
-                continue
+        touched = t is not None and t <= to_i
+        # status as it was known at to_i (replay never reveals later outcomes)
+        if is_ob and touched and (end is None or t <= end):
+            end, status = t, "tapped"            # an order block is spent once tapped
+        elif end is not None:
+            expiry = OB_EXPIRY if is_ob else FVG_EXPIRY
+            status = "expired" if end - z["formed"] > expiry else ("broken" if is_ob else "filled")
+        else:
+            status = "partly filled" if (touched and not is_ob) else "fresh"
+        if end is not None and end < from_i:
+            continue
         zones.append({"kind": z["kind"], "start": z["start"], "formed": z["formed"], "end": end,
-                      "top": z["top"], "bottom": z["bottom"]})
+                      "top": z["top"], "bottom": z["bottom"], "status": status})
     # keep the chart readable: every finished zone in view, but only the 8 most recent active ones per kind
     active = {}
     for z in reversed(zones):
@@ -188,6 +198,16 @@ def overlays(symbol: str, tf: str, from_i: int, to_i: int):
               "end": p["end"] if p["end"] is not None and p["end"] <= to_i else None}
              for p in rec.pools if p["start"] <= to_i and (p["end"] is None or p["end"] >= from_i)]
     return {"zones": zones[-400:], "swings": swings, "events": events, "pools": pools}
+
+
+@router.get("/zone_stats")
+def zone_stats(symbol: str, tf: str):
+    """Historical first-retest record of each zone type on this market (for chart tooltips)."""
+    from ..research.hypothesis import quick_stats
+    _load(symbol, tf)
+    setups = {"fvg_bull": ("fvg_bull_retest", "long"), "fvg_bear": ("fvg_bear_retest", "short"),
+              "ob_bull": ("ob_bull_retest", "long"), "ob_bear": ("ob_bear_retest", "short")}
+    return _clean({k: quick_stats(symbol, tf, [c], d) for k, (c, d) in setups.items()})
 
 
 @router.get("/zones")

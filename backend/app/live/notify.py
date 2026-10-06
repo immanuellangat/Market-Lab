@@ -55,12 +55,14 @@ def format_signal(s: dict) -> str:
     st = p.get("stats") or {}
     a = st.get("all", {})
     o = st.get("out_of_sample", {})
-    ev = st.get("evidence", {})
+    ev = p.get("evidence") or {}
     arrow = "🟢 BUY" if s["direction"] == "long" else "🔴 SELL"
     lines = [
         f"<b>{arrow} {s['symbol']} {s['tf']}</b> — {html.escape(p['name'])}",
         f"Entry ≈ {_p(s['entry'])} · SL {_p(s['stop'])} · TP {_p(s['target'])} ({p['target_r']:g}R)",
     ]
+    if p.get("unproven"):
+        lines.append("⚠ Unproven strategy: no statistically confirmed edge yet — forward-testing.")
     for t in p.get("liquidity_targets", [])[:2]:
         lines.append(f"Liquidity: {_p(t['price'])} ({html.escape(t['kind'])}, {t['rr']:.1f}R)")
     if a.get("n"):
