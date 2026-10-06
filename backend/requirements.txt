@@ -1,0 +1,11 @@
+MetaTrader5
+pandas
+numpy
+pyarrow
+scipy
+scikit-learn
+duckdb
+fastapi
+uvicorn[standard]
+pytest
+numba
