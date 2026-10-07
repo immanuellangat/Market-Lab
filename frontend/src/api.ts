@@ -106,20 +106,24 @@ export const api = {
   barContext: (symbol: string, tf: string, index: number) =>
     req<{ index: number; time: number; conditions: { id: string; label: string; category: string; bias: Bias }[] }>(`/api/bar_context?${qs({ symbol, tf, index })}`),
   test: (body: TestRequest) => post<TestResult>('/api/research/test', body),
-  setupView: (s: SetupRef & { symbol: string; tf: string }) =>
-    req<SetupView>(`/api/setup_view?${qs({ symbol: s.symbol, tf: s.tf, conditions: s.conditions.join(','), direction: s.direction,
+  setupView: (s: SetupRef & { symbol: string; tf: string }) => s.watch_id !== undefined
+    ? req<SetupView>(`/api/live/watchlist/${s.watch_id}/view`)
+    : req<SetupView>(`/api/setup_view?${qs({ symbol: s.symbol, tf: s.tf, conditions: s.conditions.join(','), direction: s.direction,
       target_r: s.target_r, stop_atr: s.stop_atr, cooldown: s.cooldown })}`),
 }
 
 /** A setup (watched or discovered) to draw on the chart. */
-export interface SetupRef { conditions: string[]; direction: 'long' | 'short'; name: string; target_r?: number; stop_atr?: number; cooldown?: number }
+export interface SetupRef { conditions: string[]; direction: 'long' | 'short' | 'both'; name: string; watch_id?: number; target_r?: number; stop_atr?: number; cooldown?: number }
 export interface SetupView {
-  symbol: string; tf: string; direction: 'long' | 'short'; index: number; time: number; close: number; atr: number
+  symbol: string; tf: string; direction: 'long' | 'short' | 'both'; index: number; time: number; close: number; atr: number
   checklist: { id: string; label: string; met: boolean; bias: Bias; level: number | null; level_label: string | null
     zone: { top: number; bottom: number; start_time: number; label: string } | null }[]
   met: number; total: number
-  occurrences: { i: number; time: number; r: number; outcome: string; oos: boolean }[]
+  occurrences: { i: number; time: number; r: number; outcome: string; oos: boolean; direction?: 'long' | 'short' }[]
   stats: Summary; evidence: Evidence
+  entry_zone: { available: false; reason: string } | {
+    available: true; top: number; bottom: number; mid: number; stop: number; target: number
+    stop_atr: number | string; target_r: number | string; anchor: string; basis: string; n: number | null }
 }
 
 // ------------------------------------------------------------------ live
@@ -152,6 +156,11 @@ export interface LiveStatus {
   enabled: boolean; mt5_ok: boolean; mt5_error: string | null; last_tick: number | null; refreshing: boolean
   last_bars: { symbol: string; tf: string; time: number }[]; telegram: boolean; log: string[]
 }
+export interface PositionSize {
+  symbol: string; direction: 'long' | 'short'; risk: number; lots: number; loss_at_stop: number; spread: number; spread_cost: number
+  profit_at_target?: number; rr?: number; note: string | null; min_lot_risk: number; risk_pct_of_balance?: number
+  account: { balance: number; equity: number; currency: string; leverage: number } | null
+}
 export interface TelegramCfg { configured: boolean; has_token: boolean; token_hint: string; chat_id: number | null; enabled: boolean }
 export interface WatchRequest {
   symbol: string; tf: string; conditions: string[]; direction: 'long' | 'short'
@@ -175,6 +184,8 @@ export const live = {
   setTelegram: (p: { token?: string; chat_id?: number; enabled?: boolean }) => post<TelegramCfg>('/api/live/telegram', p),
   detectTelegram: () => post<TelegramCfg>('/api/live/telegram/detect', {}),
   testTelegram: () => post<{ sent: boolean }>('/api/live/telegram/test', {}),
+  positionSize: (q: { symbol: string; entry: number; stop: number; target?: number | null; risk?: number; risk_pct?: number }) =>
+    req<PositionSize>(`/api/live/position_size?${qs(q)}`),
   candle: (symbol: string, tf: string) =>
     req<{ time: number; open: number; high: number; low: number; close: number; bid: number | null; closes_at: number }>(`/api/live/candle?${qs({ symbol, tf })}`),
 }

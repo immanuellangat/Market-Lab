@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from 'react'
 import { live, type LiveStatus, type Signal, type TelegramCfg, type Watch } from '../api'
 import { notifyPermission, requestNotify } from '../alerts'
+import RiskCalc from '../RiskCalc'
 import { fmt, useApp } from '../state'
 
 const ago = (t: number) => {
@@ -101,6 +102,7 @@ export default function LivePage() {
 function SignalCard({ s }: { s: Signal }) {
   const { openChartAt } = useApp()
   const [open, setOpen] = useState(false)
+  const [calc, setCalc] = useState(false)
   const p = s.payload
   const a = p.stats?.all
   const o = p.stats?.out_of_sample
@@ -149,9 +151,12 @@ function SignalCard({ s }: { s: Signal }) {
         <div className="row">
           <button className="btn sm" onClick={() => openChartAt({ symbol: s.symbol, tf: s.tf, time: s.bar_time, replay: false, label: 'Signal', direction: s.direction })}>Open on chart</button>
           <button className="btn sm ghost" onClick={() => setOpen(v => !v)}>{open ? 'Hide details' : 'Market context & past matches'}</button>
+          {s.status === 'open' && <button className="btn sm" onClick={() => setCalc(v => !v)}>{calc ? 'Hide calculator' : 'Lot size calculator'}</button>}
           <span className="grow" />
           <span className="small faint">Historical evidence, not a guarantee.</span>
         </div>
+
+        {calc && <RiskCalc symbol={s.symbol} entry={s.entry} stop={s.stop} target={s.target} />}
 
         {open && (
           <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
@@ -205,7 +210,11 @@ function WatchlistPanel({ watches, busy, act }: { watches: Watch[]; busy: string
               )}
               {rec && <div className="small num">Live: {rec.signals} signals · {rec.wins}W / {rec.losses}L · {rec.open} open{rec.avg_r !== null ? ` · ${fmt.r(rec.avg_r)} avg` : ''}</div>}
               <div className="row">
-                {!w.conditions[0]?.startsWith('strategy:') && w.direction !== 'both' && (
+                {w.conditions[0]?.startsWith('strategy:') ? (
+                  <button className="btn sm" title="Show where this strategy stands now, its possible entry zone and its past trades"
+                    onClick={() => openChartAt({ symbol: w.symbol, tf: w.tf, time: Math.floor(Date.now() / 1000), replay: false,
+                      setup: { conditions: w.conditions, direction: w.direction, name: w.name, watch_id: w.id } })}>View on chart</button>
+                ) : (
                   <button className="btn sm" title="Show this setup on the chart: which conditions hold now and every past occurrence"
                     onClick={() => openChartAt({ symbol: w.symbol, tf: w.tf, time: Math.floor(Date.now() / 1000), replay: false,
                       setup: { conditions: w.conditions, direction: w.direction as 'long' | 'short', name: w.name, target_r: w.target_r, stop_atr: w.stop_atr, cooldown: w.cooldown } })}>View on chart</button>

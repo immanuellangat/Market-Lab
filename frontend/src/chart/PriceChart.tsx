@@ -236,14 +236,18 @@ export default function PriceChart({ bars, showCount, overlays, layers, keyZones
     if (setupView) {
       const sv = setupView
       // conditions with a real price level: a line at that level
-      const withLevel = sv.checklist.filter(c => c.level !== null)
+      // (one line per price: a later condition at the same level is listed in the panel only)
+      const drawn = new Set<string>()
+      const withLevel = sv.checklist.filter(c => c.level !== null && !drawn.has(c.level.toPrecision(8)) && drawn.add(c.level.toPrecision(8)))
       withLevel.forEach(c => segs.push({ l1: Math.max(0, last - 80), l2: 'right', price: c.level!, width: 1.5,
         color: c.met ? t.bull : t.warn, dash: !c.met,
         label: `${c.met ? '✓' : '✗'} ${c.label} · ${c.level_label} ${fmt.price(c.level)}` }))
       // conditions without a price (day, session, volatility, higher-timeframe state...): an imaginary
       // marker line just above price, stacked so the labels never overlap
       // conditions about a zone (FVG / order block): the nearest active zone as a box, i.e. where the retest would happen
-      sv.checklist.filter(c => c.zone).forEach(c => {
+      // (skipped when the possible entry zone below is this same zone: one box, one label)
+      const ezFromZone = sv.entry_zone.available && sv.entry_zone.n === null ? sv.entry_zone.anchor : null
+      sv.checklist.filter(c => c.zone && c.label !== ezFromZone).forEach(c => {
         const z = c.zone!
         let lo = 0, hi = last
         while (lo < hi) { const mid = (lo + hi) >> 1; if (bars.time[mid] < z.start_time) lo = mid + 1; else hi = mid }
@@ -252,9 +256,21 @@ export default function PriceChart({ bars, showCount, overlays, layers, keyZones
           label: `${c.met ? '✓' : '✗'} ${c.label} · ${z.label}`, labelColor: col })
       })
       const noLevel = sv.checklist.filter(c => c.level === null && !c.zone)
-      noLevel.forEach((c, k) => segs.push({ l1: Math.max(0, last - 25), l2: 'right', price: sv.close + (0.8 + 0.55 * k) * sv.atr,
+      // stacked on the side away from the entry (below price for sells, above for buys) so they never cover the entry zone
+      const side = sv.direction === 'short' ? -1 : 1
+      noLevel.forEach((c, k) => segs.push({ l1: Math.max(0, last - 25), l2: 'right', price: sv.close + side * (0.8 + 0.55 * k) * sv.atr,
         color: c.met ? t.bull : t.warn, dash: true, width: 1.5,
         label: `${c.met ? '✓' : '✗'} ${c.label}` }))
+      // possible entry zone (estimate: the tested entry is the next open after all conditions are met)
+      const ez = sv.entry_zone
+      if (ez.available) {
+        const l1 = Math.max(0, last - 30)
+        rects.push({ l1, l2: 'right', top: ez.top, bottom: ez.bottom, fill: alpha(t.accent, 0.18), stroke: t.accent,
+          label: `Possible entry zone ${fmt.price(ez.bottom)}–${fmt.price(ez.top)}`
+            + (ezFromZone ? ` · ${sv.checklist.find(c => c.label === ezFromZone)?.met ? '✓' : '✗'} ${ezFromZone}` : ''), labelColor: t.accent })
+        segs.push({ l1, l2: 'right', price: ez.stop, color: t.bear, dash: true, width: 1.5, label: `Stop ≈ ${fmt.price(ez.stop)} (${typeof ez.stop_atr === 'number' ? `${ez.stop_atr}× ATR` : ez.stop_atr})` })
+        segs.push({ l1, l2: 'right', price: ez.target, color: t.bull, dash: true, width: 1.5, label: `Target ≈ ${fmt.price(ez.target)} (${typeof ez.target_r === 'number' ? `${ez.target_r}R` : ez.target_r})` })
+      }
       if (showOccurrences) {
         const times = bars.time
         const seen = sv.occurrences.filter(o => o.time >= times[0] && o.time <= times[last])
@@ -264,8 +280,9 @@ export default function PriceChart({ bars, showCount, overlays, layers, keyZones
           while (lo < hi) { const mid = (lo + hi) >> 1; if (times[mid] < o.time) lo = mid + 1; else hi = mid }
           if (times[lo] !== o.time) return
           const win = o.r > 0
-          mk.push({ time: ct(times[lo]), position: sv.direction === 'short' ? 'aboveBar' : 'belowBar',
-            shape: sv.direction === 'short' ? 'arrowDown' : 'arrowUp', color: win ? t.bull : t.bear, size: 1,
+          const short = (o.direction ?? sv.direction) === 'short'
+          mk.push({ time: ct(times[lo]), position: short ? 'aboveBar' : 'belowBar',
+            shape: short ? 'arrowDown' : 'arrowUp', color: win ? t.bull : t.bear, size: 1,
             text: k < 40 ? `${o.r >= 0 ? '+' : ''}${o.r.toFixed(1)}R` : undefined })
         })
       }

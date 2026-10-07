@@ -264,6 +264,51 @@ def _nearest_zone(rec, df, kind: str, fresh: bool, i: int, close: float) -> dict
     return {"top": float(z["top"]), "bottom": float(z["bottom"]), "start_time": int(df["time"].iloc[z["start"]].timestamp())}
 
 
+def _entry_zone(df, checklist: list[dict], occ: list[dict], direction: str, stop_atr: float, target_r: float) -> dict:
+    """Where the entry (next candle open after all conditions are met) is likely to be.
+
+    FVG / order-block condition -> that zone (the retest happens inside it).
+    Price-level condition       -> past entries measured from the level in ATR; the middle 50% placed around today's level.
+    No price anchor             -> no zone (the entry is wherever the conditions line up)."""
+    from ..research.conditions import base_id
+    row = df.iloc[-1]
+    atr = float(row["atr"])
+    sg = 1 if direction == "long" else -1
+    zone = next((c for c in checklist if c.get("zone")), None)
+    out = None
+    if zone:
+        z = zone["zone"]
+        out = {"top": z["top"], "bottom": z["bottom"], "basis": f"{zone['label']}: the retest happens inside the nearest untouched zone",
+               "anchor": zone["label"], "n": None}
+    else:
+        lvl = next((c for c in checklist if c.get("level") is not None), None)
+        if lvl:
+            b = base_id(lvl["id"])
+            if b in _LEVEL_OF:
+                anchor = df[_LEVEL_OF[b][0]].to_numpy(float)
+            else:
+                fr = _PD_FRACTION[b]
+                anchor = (df["last_sl"] + fr * (df["last_sh"] - df["last_sl"])).to_numpy(float)
+            o, a = df["open"].to_numpy(float), df["atr"].to_numpy(float)
+            idx = np.array([e["i"] for e in occ if e["i"] + 1 < len(df)], dtype=int)
+            if len(idx) >= 10:
+                off = (o[idx + 1] - anchor[idx]) / a[idx]
+                off = off[np.isfinite(off)]
+                if len(off) >= 10:
+                    q25, q75 = np.percentile(off, [25, 75])
+                    lo, hi = lvl["level"] + q25 * atr, lvl["level"] + q75 * atr
+                    out = {"top": float(max(lo, hi)), "bottom": float(min(lo, hi)), "anchor": lvl["label"], "n": int(len(off)),
+                           "basis": f"half of the last {len(off)} entries were {q25:+.2f} to {q75:+.2f} ATR from the "
+                                    f"{lvl['level_label']} ({lvl['label']})"}
+    if out is None:
+        return {"available": False, "reason": "This pattern has no price anchor (only trend, session, volatility or "
+                                              "higher-timeframe conditions): it enters wherever the conditions line up."}
+    mid = (out["top"] + out["bottom"]) / 2
+    stop = mid - sg * stop_atr * atr
+    return out | {"available": True, "mid": mid, "stop": stop, "target": mid + sg * target_r * stop_atr * atr,
+                  "stop_atr": stop_atr, "target_r": target_r}
+
+
 @router.get("/setup_view")
 def setup_view(symbol: str, tf: str, conditions: str, direction: str = "long", target_r: float = 2.0,
                stop_atr: float = DEFAULT_STOP_ATR, cooldown: int = 5):
@@ -305,6 +350,7 @@ def setup_view(symbol: str, tf: str, conditions: str, direction: str = "long", t
         "close": float(row["close"]), "atr": float(row["atr"]), "checklist": checklist,
         "met": sum(x["met"] for x in checklist), "total": len(checklist),
         "occurrences": occ, "stats": res["stats"]["all"], "evidence": res["evidence"],
+        "entry_zone": _entry_zone(df, checklist, occ, direction, stop_atr, target_r),
     })
 
 

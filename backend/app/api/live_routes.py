@@ -1,6 +1,7 @@
 """Live feed, watchlist, signals and alert settings."""
 from __future__ import annotations
 
+import numpy as np
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 
@@ -41,6 +42,61 @@ def forming_candle(symbol: str, tf: str):
     if bar is None:
         raise HTTPException(503, "MT5 returned no data")
     return bar
+
+
+@router.get("/position_size")
+def position_size(symbol: str, entry: float, stop: float, target: float | None = None,
+                  risk: float | None = None, risk_pct: float | None = None):
+    """Lot size so that a stop-out loses at most the risk amount (spread included), and the outcome at target.
+
+    Uses the broker's contract (tick value / size, lot step) from MT5; the last known contract is
+    remembered so the calculator still works while MT5 is offline."""
+    import math
+    from ..data.mt5_source import MT5Error, source
+    from ..data.store import load_bars
+    from ..execution.sizing import lots_for_risk
+    from ..research.hypothesis import point_size
+    from ..research.outcomes import spread_price
+    if symbol not in SYMBOLS:
+        raise HTTPException(400, "Unknown symbol")
+    contracts = db.get_setting("contracts", {})
+    account = None
+    try:
+        c = source.contract(symbol)
+        if c:
+            contracts[symbol] = c
+            db.set_setting("contracts", contracts)
+        account = source.account()
+    except (MT5Error, Exception):
+        pass
+    c = contracts.get(symbol)
+    if not c:
+        raise HTTPException(503, "Contract details unknown: connect MT5 once so the calculator can learn them.")
+    if risk is None:
+        if risk_pct is None or not account:
+            raise HTTPException(400, "Enter a risk amount (or a % of balance while MT5 is connected).")
+        risk = account["balance"] * risk_pct / 100
+    if risk <= 0:
+        raise HTTPException(400, "Risk must be positive.")
+    dist = abs(entry - stop)
+    if dist <= 0:
+        raise HTTPException(400, "Stop must differ from entry.")
+    bars = load_bars(symbol, "H1").tail(500)
+    spread = float(np.median(spread_price(bars, point_size(symbol))))   # typical spread in price
+    size = lots_for_risk(risk, dist + spread, c)
+    lots = size["lots"]
+    per_price = lots / c["tick_size"] * c["tick_value"]                # money per 1.0 price move at this size
+    out = {"symbol": symbol, "direction": "long" if stop < entry else "short", "risk": round(risk, 2),
+           "lots": lots, "loss_at_stop": round((dist + spread) * per_price, 2), "spread": spread,
+           "spread_cost": round(spread * per_price, 2), "contract": c, "account": account, "note": size.get("note"),
+           "min_lot_risk": round(c["vol_min"] / c["tick_size"] * c["tick_value"] * (dist + spread), 2)}
+    if target is not None:
+        reward = abs(target - entry)
+        out["profit_at_target"] = round((reward - spread) * per_price, 2)
+        out["rr"] = round(reward / dist, 2)
+    if account and account["balance"] > 0:
+        out["risk_pct_of_balance"] = round(100 * out["loss_at_stop"] / account["balance"], 1)
+    return _clean(out)
 
 
 @router.post("/scan_now")
@@ -119,6 +175,19 @@ def refresh_watch(wid: int):
         raise HTTPException(404, "Not found")
     db.update_watch(wid, stats=snapshot_stats(w), stats_updated=int(time.time()))
     return _clean(db.get_watch(wid))
+
+
+@router.get("/watchlist/{wid}/view")
+def watch_view(wid: int):
+    """Chart view of a strategy watch (CRT / SMC): steps met now, possible entry zone, past trades."""
+    from ..strategies.live import is_strategy
+    from ..strategies.view import strategy_view
+    w = db.get_watch(wid)
+    if not w:
+        raise HTTPException(404, "Not found")
+    if not is_strategy(w):
+        raise HTTPException(400, "Use /api/setup_view for condition-based setups")
+    return _clean(strategy_view(w))
 
 
 @router.delete("/watchlist/{wid}")

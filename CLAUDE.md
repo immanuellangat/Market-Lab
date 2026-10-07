@@ -64,4 +64,9 @@ D1 structure agrees, H4 discount/premium, killzone; struct stop, 2R) — FORWARD
    `/api/setup_view` -> checklist (met/not, price level where one exists via `_LEVEL_OF`/`_PD_FRACTION` in routes.py)
    + past occurrences. Chart: real levels = lines at price; conditions without a price = labelled dashed "marker lines"
    stacked above price (user's request); green = met, amber = not; arrows = past trades (green win / red loss).
-   Not available for strategy watches (CRT/SMC) yet. UI check script: Playwright + installed Chrome works headless.
+   Strategy watches (CRT/SMC) use `/api/live/watchlist/{id}/view` (`strategies/view.py`). Each view has a
+   "possible entry zone" (FVG/OB zone, or middle 50% of past entries measured from a level in ATR; none if no price
+   anchor) with projected stop/target. UI check: Playwright + installed Chrome works headless (scratchpad scripts).
+5. DONE 2026-10-07: key trade zones sorted by grade -> score -> distance. Risk calculator (`frontend/src/RiskCalc.tsx`,
+   `/api/live/position_size`): lots from risk ($ or % balance) incl. spread, via MT5 contract (cached in setting
+   `contracts`). User's MT5 balance is $0.37 — min lot exceeds sensible risk on every setup.

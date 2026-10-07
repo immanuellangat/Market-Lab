@@ -1,12 +1,14 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { api, live, type Bars, type Bias, type KeyZones, type Overlays, type QuickStats, type SetupRef, type SetupView, type TradeZone } from '../api'
 import PriceChart, { type Layers } from '../chart/PriceChart'
+import RiskCalc from '../RiskCalc'
 import { TZ_LABEL, fmt, useApp } from '../state'
 
 const LAYER_LABELS: [keyof Layers, string][] = [
   ['zones', 'Trade zones'], ['fvg', 'FVG'], ['ob', 'Order blocks'], ['spent', 'Spent zones'], ['structure', 'BOS / CHoCH'],
   ['liquidity', 'Liquidity'], ['swings', 'Swings'], ['levels', 'PDH/PDL · Asia'],
 ]
+const GRADE_RANK: Record<string, number> = { A: 0, B: 1, C: 2, D: 3, F: 4 }
 const WINDOW = 4000      // bars loaded for normal browsing
 const REPLAY_AHEAD = 1500 // future bars pre-loaded (hidden) for replay
 
@@ -158,7 +160,12 @@ export default function ChartPage({ theme }: { theme: string }) {
 
   const symOptions = meta?.symbols ?? []
   const tfOptions = meta?.timeframes ?? ['M5', 'M15', 'H1', 'H4', 'D1']
-  const zoneList = useMemo(() => zones ? [...zones.buy_zones, ...zones.sell_zones] : [], [zones])
+  // best evidence first: grade (A..F), then evidence score, then the zone closest to price.
+  // Zones reload on every closed candle, so the order updates by itself when a better setup appears.
+  const zoneList = useMemo(() => zones ? [...zones.buy_zones, ...zones.sell_zones].sort((a, b) =>
+    (GRADE_RANK[a.stats.grade] ?? 9) - (GRADE_RANK[b.stats.grade] ?? 9)
+    || (b.stats.score ?? 0) - (a.stats.score ?? 0)
+    || (a.distance_atr ?? 99) - (b.distance_atr ?? 99)) : [], [zones])
 
   return (
     <div className="page">
@@ -220,7 +227,7 @@ export default function ChartPage({ theme }: { theme: string }) {
         <div className="side">
           {setupRef && <SetupPanel name={setupRef.name} view={setupView} showOcc={showOcc} setShowOcc={setShowOcc}
             onClose={() => { setSetupRef(null); setSetupView(null) }}
-            onReplay={t => openChartAt({ symbol, tf, time: t, replay: true, label: setupRef.name, direction: setupRef.direction })} />}
+            onReplay={t => openChartAt({ symbol, tf, time: t, replay: true, label: setupRef.name, direction: setupRef.direction === 'both' ? undefined : setupRef.direction })} />}
           <div className="panel">
             <div className="panel-head">
               <h3>Key trade zones</h3>
@@ -311,7 +318,7 @@ function SetupPanel({ name, view, showOcc, setShowOcc, onClose, onReplay }: {
       </div>
       <div className="panel-body" style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
         <div className="row">
-          {view && <span className={`chip ${view.direction === 'long' ? 'bull' : 'bear'}`}>{view.direction === 'long' ? 'BUY' : 'SELL'}</span>}
+          {view && <span className={`chip ${view.direction === 'long' ? 'bull' : view.direction === 'short' ? 'bear' : 'accent'}`}>{view.direction === 'long' ? 'BUY' : view.direction === 'short' ? 'SELL' : 'BUY/SELL'}</span>}
           <b style={{ fontSize: 13 }}>{name}</b>
         </div>
         {!view && <span className="small muted row"><span className="spinner" /> checking the latest candle…</span>}
@@ -331,6 +338,23 @@ function SetupPanel({ name, view, showOcc, setShowOcc, onClose, onReplay }: {
                 </div>
               ))}
             </div>
+            <div className="zone-card" style={{ cursor: 'default' }}>
+              <b style={{ fontSize: 13 }}>Possible entry zone</b>
+              {view.entry_zone.available ? (
+                <>
+                  <div className="lv num">
+                    <span className="muted">Zone</span><span>{fmt.price(view.entry_zone.bottom)}–{fmt.price(view.entry_zone.top)}</span><span />
+                    <span className="muted">Stop ≈</span><span className="neg">{fmt.price(view.entry_zone.stop)}</span><span className="faint">{typeof view.entry_zone.stop_atr === 'number' ? `${view.entry_zone.stop_atr}× ATR` : view.entry_zone.stop_atr}</span>
+                    <span className="muted">Target ≈</span><span className="pos">{fmt.price(view.entry_zone.target)}</span><span className="faint">{typeof view.entry_zone.target_r === 'number' ? `${view.entry_zone.target_r}R` : view.entry_zone.target_r}</span>
+                  </div>
+                  <div className="small muted">Based on: {view.entry_zone.basis}.</div>
+                  <div className="small faint">An estimate from the middle of the zone. The real trade is only taken when every condition is met — entry at the next candle's open, levels recalculated then.</div>
+                </>
+              ) : <div className="small muted">{view.entry_zone.reason}</div>}
+            </div>
+            {view.entry_zone.available && (
+              <RiskCalc symbol={view.symbol} entry={view.entry_zone.mid} stop={view.entry_zone.stop} target={view.entry_zone.target} />
+            )}
             <div className={`small ${ready ? 'pos' : 'muted'}`}>
               {ready
                 ? 'All conditions are met on the latest closed candle — this is a signal (see Live signals for entry, stop and target).'
