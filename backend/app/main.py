@@ -40,4 +40,5 @@ if DIST.exists():
         f = (DIST / path).resolve()
         if path and f.is_file() and DIST.resolve() in f.parents:  # icons, manifest, favicon
             return FileResponse(f)
-        return FileResponse(DIST / "index.html")
+        # never cache the page itself: after a rebuild a plain reload must pick up the new assets
+        return FileResponse(DIST / "index.html", headers={"Cache-Control": "no-cache"})

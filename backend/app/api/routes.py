@@ -229,6 +229,85 @@ def bar_context(symbol: str, tf: str, index: int):
     return {"index": index, "time": int(df["time"].iloc[index].timestamp()), "conditions": active}
 
 
+# conditions that refer to a price level: (column, label). Everything else is shown as a labelled marker line.
+_LEVEL_OF = {
+    "sweep_pdl": ("pdl", "PDL"), "sweep_pdl_recent": ("pdl", "PDL"), "break_pdl": ("pdl", "PDL"),
+    "sweep_pdh": ("pdh", "PDH"), "sweep_pdh_recent": ("pdh", "PDH"), "break_pdh": ("pdh", "PDH"),
+    "sweep_asia_low": ("asia_low", "Asia low"), "sweep_asia_low_recent": ("asia_low", "Asia low"),
+    "sweep_asia_high": ("asia_high", "Asia high"), "sweep_asia_high_recent": ("asia_high", "Asia high"),
+    "sweep_low": ("last_sl", "Swing low"), "sweep_low_recent": ("last_sl", "Swing low"),
+    "sweep_high": ("last_sh", "Swing high"), "sweep_high_recent": ("last_sh", "Swing high"),
+    "above_day_open": ("day_open", "Daily open"), "below_day_open": ("day_open", "Daily open"),
+    "ema_bull": ("ema50", "EMA50"), "ema_bear": ("ema50", "EMA50"),
+}
+_PD_FRACTION = {"discount": 0.5, "premium": 0.5, "deep_discount": 0.25, "deep_premium": 0.75}
+# conditions that refer to a zone: (zone kind, fresh only = first retest still possible, label)
+_ZONE_OF = {
+    "fvg_bull_retest": ("fvg_bull", True, "Bullish FVG"), "fvg_bear_retest": ("fvg_bear", True, "Bearish FVG"),
+    "fvg_bull": ("fvg_bull", False, "Bullish FVG"), "fvg_bear": ("fvg_bear", False, "Bearish FVG"),
+    "fvg_bull_disp": ("fvg_bull", False, "Bullish FVG"), "fvg_bear_disp": ("fvg_bear", False, "Bearish FVG"),
+    "in_bull_fvg": ("fvg_bull", False, "Bullish FVG"), "in_bear_fvg": ("fvg_bear", False, "Bearish FVG"),
+    "ob_bull_retest": ("ob_bull", True, "Bullish order block"), "ob_bear_retest": ("ob_bear", True, "Bearish order block"),
+}
+
+
+def _nearest_zone(rec, df, kind: str, fresh: bool, i: int, close: float) -> dict | None:
+    """The active zone of this kind closest to price (for a bullish zone, preferably below price)."""
+    bull = kind.endswith("bull")
+    cand = [z for z in rec.zones if z["kind"] == kind and z["formed"] <= i and z["end"] is None
+            and not (fresh and z.get("touched") and z.get("touch_i", 10**12) <= i)]
+    if not cand:
+        return None
+    side = [z for z in cand if (z["top"] <= close if bull else z["bottom"] >= close)]
+    pool = side or cand
+    z = min(pool, key=lambda z: min(abs(close - z["top"]), abs(close - z["bottom"])))
+    return {"top": float(z["top"]), "bottom": float(z["bottom"]), "start_time": int(df["time"].iloc[z["start"]].timestamp())}
+
+
+@router.get("/setup_view")
+def setup_view(symbol: str, tf: str, conditions: str, direction: str = "long", target_r: float = 2.0,
+               stop_atr: float = DEFAULT_STOP_ATR, cooldown: int = 5):
+    """A setup drawn on the chart: which of its conditions hold on the latest closed candle (with a price
+    level where the condition has one) and every past occurrence with its result."""
+    from ..research.conditions import BY_ID, base_id, evaluate, label_of
+    ids = [c for c in conditions.split(",") if c]
+    unknown = [c for c in ids if base_id(c) not in BY_ID]
+    if unknown or direction not in ("long", "short"):
+        raise HTTPException(400, f"Unknown conditions {unknown}" if unknown else "direction must be long or short")
+    df, rec = _load(symbol, tf)
+    i = len(df) - 1
+    row = df.iloc[i]
+    checklist = []
+    for cid in ids:
+        try:
+            met = bool(evaluate(df.iloc[max(0, i - 600):], [cid])[-1])
+        except KeyError:
+            met = False
+        c = BY_ID[base_id(cid)]
+        item = {"id": cid, "label": label_of(cid), "met": met, "bias": c.bias, "level": None, "level_label": None, "zone": None}
+        b = base_id(cid)
+        if b in _ZONE_OF:
+            kind, fresh, zl = _ZONE_OF[b]
+            z = _nearest_zone(rec, df, kind, fresh, i, float(row["close"]))
+            if z:
+                item["zone"] = z | {"label": f"{'Retest zone' if fresh else 'Zone'} · nearest {'untouched ' if fresh else ''}{zl}"}
+        elif b in _LEVEL_OF and _LEVEL_OF[b][0] in df.columns and np.isfinite(row[_LEVEL_OF[b][0]]):
+            item["level"], item["level_label"] = float(row[_LEVEL_OF[b][0]]), _LEVEL_OF[b][1]
+        elif b in _PD_FRACTION and np.isfinite(row.get("last_sh", np.nan)) and np.isfinite(row.get("last_sl", np.nan)):
+            fr = _PD_FRACTION[b]
+            item["level"] = float(row["last_sl"] + fr * (row["last_sh"] - row["last_sl"]))
+            item["level_label"] = f"{fr:.0%} of swing range"
+        checklist.append(item)
+    res = run_test(symbol, tf, ids, direction, target_r, stop_atr, cooldown=cooldown, max_examples=400)
+    occ = [{"i": e["i"], "time": e["time"], "r": e["r"], "outcome": e["outcome"], "oos": e["oos"]} for e in res.get("examples", [])]
+    return _clean({
+        "symbol": symbol, "tf": tf, "direction": direction, "index": i, "time": int(row["time"].timestamp()),
+        "close": float(row["close"]), "atr": float(row["atr"]), "checklist": checklist,
+        "met": sum(x["met"] for x in checklist), "total": len(checklist),
+        "occurrences": occ, "stats": res["stats"]["all"], "evidence": res["evidence"],
+    })
+
+
 # ------------------------------------------------------------------ research
 class TestReq(BaseModel):
     symbol: str

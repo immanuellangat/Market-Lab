@@ -106,6 +106,20 @@ export const api = {
   barContext: (symbol: string, tf: string, index: number) =>
     req<{ index: number; time: number; conditions: { id: string; label: string; category: string; bias: Bias }[] }>(`/api/bar_context?${qs({ symbol, tf, index })}`),
   test: (body: TestRequest) => post<TestResult>('/api/research/test', body),
+  setupView: (s: SetupRef & { symbol: string; tf: string }) =>
+    req<SetupView>(`/api/setup_view?${qs({ symbol: s.symbol, tf: s.tf, conditions: s.conditions.join(','), direction: s.direction,
+      target_r: s.target_r, stop_atr: s.stop_atr, cooldown: s.cooldown })}`),
+}
+
+/** A setup (watched or discovered) to draw on the chart. */
+export interface SetupRef { conditions: string[]; direction: 'long' | 'short'; name: string; target_r?: number; stop_atr?: number; cooldown?: number }
+export interface SetupView {
+  symbol: string; tf: string; direction: 'long' | 'short'; index: number; time: number; close: number; atr: number
+  checklist: { id: string; label: string; met: boolean; bias: Bias; level: number | null; level_label: string | null
+    zone: { top: number; bottom: number; start_time: number; label: string } | null }[]
+  met: number; total: number
+  occurrences: { i: number; time: number; r: number; outcome: string; oos: boolean }[]
+  stats: Summary; evidence: Evidence
 }
 
 // ------------------------------------------------------------------ live

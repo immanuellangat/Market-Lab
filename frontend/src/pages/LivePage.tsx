@@ -181,6 +181,7 @@ function SignalCard({ s }: { s: Signal }) {
 }
 
 function WatchlistPanel({ watches, busy, act }: { watches: Watch[]; busy: string | null; act: (l: string, f: () => Promise<unknown>) => void }) {
+  const { openChartAt } = useApp()
   return (
     <div className="panel">
       <div className="panel-head"><h3>Watched setups</h3><span className="small faint">{watches.filter(w => w.active).length} active</span></div>
@@ -204,6 +205,11 @@ function WatchlistPanel({ watches, busy, act }: { watches: Watch[]; busy: string
               )}
               {rec && <div className="small num">Live: {rec.signals} signals · {rec.wins}W / {rec.losses}L · {rec.open} open{rec.avg_r !== null ? ` · ${fmt.r(rec.avg_r)} avg` : ''}</div>}
               <div className="row">
+                {!w.conditions[0]?.startsWith('strategy:') && w.direction !== 'both' && (
+                  <button className="btn sm" title="Show this setup on the chart: which conditions hold now and every past occurrence"
+                    onClick={() => openChartAt({ symbol: w.symbol, tf: w.tf, time: Math.floor(Date.now() / 1000), replay: false,
+                      setup: { conditions: w.conditions, direction: w.direction as 'long' | 'short', name: w.name, target_r: w.target_r, stop_atr: w.stop_atr, cooldown: w.cooldown } })}>View on chart</button>
+                )}
                 <button className="btn sm" onClick={() => act(`t${w.id}`, () => live.patchWatch(w.id, { active: !w.active }))}>{w.active ? 'Pause' : 'Resume'}</button>
                 <button className="btn sm" disabled={!!busy} onClick={() => act(`r${w.id}`, () => live.refreshWatch(w.id))}>{busy === `r${w.id}` && <span className="spinner" />} Refresh stats</button>
                 <span className="grow" />

@@ -60,3 +60,8 @@ D1 structure agrees, H4 discount/premium, killzone; struct stop, 2R) — FORWARD
    lot sizing on live signals not done. A corrupted feature-cache pickle broke one run: delete
    `%LOCALAPPDATA%\MarketLab\data\features\*` entries that fail to load (they rebuild).
 3. Optional: show recently filled zones (last ~50 candles) by default on the chart.
+4. DONE 2026-10-07: "View on chart" for watched setups (Live page) and discovered patterns (library row + pattern page).
+   `/api/setup_view` -> checklist (met/not, price level where one exists via `_LEVEL_OF`/`_PD_FRACTION` in routes.py)
+   + past occurrences. Chart: real levels = lines at price; conditions without a price = labelled dashed "marker lines"
+   stacked above price (user's request); green = met, amber = not; arrows = past trades (green win / red loss).
+   Not available for strategy watches (CRT/SMC) yet. UI check script: Playwright + installed Chrome works headless.

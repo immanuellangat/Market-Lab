@@ -3,7 +3,7 @@ import {
   CandlestickSeries, ColorType, CrosshairMode, LineSeries, LineStyle, LineType, createChart, createSeriesMarkers,
   type IChartApi, type ISeriesApi, type ISeriesMarkersPluginApi, type SeriesMarker, type Time, type UTCTimestamp,
 } from 'lightweight-charts'
-import type { Bars, KeyZones, Overlays, QuickStats, TradeZone, Zone } from '../api'
+import type { Bars, KeyZones, Overlays, QuickStats, SetupView, TradeZone, Zone } from '../api'
 import { TZ_LABEL, TZ_OFFSET, fmt } from '../state'
 import { OverlayPrimitive, type Rect, type Seg } from './overlayPrimitive'
 
@@ -24,6 +24,9 @@ interface Props {
   /** historical first-retest record per zone type (fvg_bull, ob_bear, ...) for tooltips */
   zoneStats?: Record<string, QuickStats> | null
   onBarClick?: (globalIndex: number) => void
+  /** a setup drawn on the chart: condition lines + past occurrences */
+  setupView?: SetupView | null
+  showOccurrences?: boolean
 }
 
 // Lightweight Charts renders timestamps as UTC; shifting by the local offset displays local time.
@@ -42,7 +45,7 @@ const alpha = (hex: string, a: number) => {
   return `rgba(${n >> 16},${(n >> 8) & 255},${n & 255},${a})`
 }
 
-export default function PriceChart({ bars, showCount, overlays, layers, keyZones, selectedZone, marker, theme, liveBar, zoneStats, onBarClick }: Props) {
+export default function PriceChart({ bars, showCount, overlays, layers, keyZones, selectedZone, marker, theme, liveBar, zoneStats, onBarClick, setupView, showOccurrences = true }: Props) {
   const box = useRef<HTMLDivElement>(null)
   const chart = useRef<IChartApi | null>(null)
   const candles = useRef<ISeriesApi<'Candlestick'> | null>(null)
@@ -230,6 +233,43 @@ export default function PriceChart({ bars, showCount, overlays, layers, keyZones
       z.stat_targets.forEach(x => segs.push({ l1: start, l2: 'right', price: x.price, color: alpha(t.accent, 0.8), dash: true,
         label: `${x.kind} · ${fmt.num(x.rr, 1)}R` }))
     }
+    if (setupView) {
+      const sv = setupView
+      // conditions with a real price level: a line at that level
+      const withLevel = sv.checklist.filter(c => c.level !== null)
+      withLevel.forEach(c => segs.push({ l1: Math.max(0, last - 80), l2: 'right', price: c.level!, width: 1.5,
+        color: c.met ? t.bull : t.warn, dash: !c.met,
+        label: `${c.met ? '✓' : '✗'} ${c.label} · ${c.level_label} ${fmt.price(c.level)}` }))
+      // conditions without a price (day, session, volatility, higher-timeframe state...): an imaginary
+      // marker line just above price, stacked so the labels never overlap
+      // conditions about a zone (FVG / order block): the nearest active zone as a box, i.e. where the retest would happen
+      sv.checklist.filter(c => c.zone).forEach(c => {
+        const z = c.zone!
+        let lo = 0, hi = last
+        while (lo < hi) { const mid = (lo + hi) >> 1; if (bars.time[mid] < z.start_time) lo = mid + 1; else hi = mid }
+        const col = c.met ? t.bull : t.warn
+        rects.push({ l1: Math.max(0, lo), l2: 'right', top: z.top, bottom: z.bottom, fill: alpha(col, 0.16), stroke: col, dash: !c.met,
+          label: `${c.met ? '✓' : '✗'} ${c.label} · ${z.label}`, labelColor: col })
+      })
+      const noLevel = sv.checklist.filter(c => c.level === null && !c.zone)
+      noLevel.forEach((c, k) => segs.push({ l1: Math.max(0, last - 25), l2: 'right', price: sv.close + (0.8 + 0.55 * k) * sv.atr,
+        color: c.met ? t.bull : t.warn, dash: true, width: 1.5,
+        label: `${c.met ? '✓' : '✗'} ${c.label}` }))
+      if (showOccurrences) {
+        const times = bars.time
+        const seen = sv.occurrences.filter(o => o.time >= times[0] && o.time <= times[last])
+        seen.slice(0, 150).forEach((o, k) => {
+          // binary search the candle of this occurrence
+          let lo = 0, hi = last
+          while (lo < hi) { const mid = (lo + hi) >> 1; if (times[mid] < o.time) lo = mid + 1; else hi = mid }
+          if (times[lo] !== o.time) return
+          const win = o.r > 0
+          mk.push({ time: ct(times[lo]), position: sv.direction === 'short' ? 'aboveBar' : 'belowBar',
+            shape: sv.direction === 'short' ? 'arrowDown' : 'arrowUp', color: win ? t.bull : t.bear, size: 1,
+            text: k < 40 ? `${o.r >= 0 ? '+' : ''}${o.r.toFixed(1)}R` : undefined })
+        })
+      }
+    }
     if (marker && marker.index >= off && marker.index - off <= last) {
       mk.push({ time: timeOf(marker.index), position: marker.dir === 'short' ? 'aboveBar' : 'belowBar',
         shape: marker.dir === 'short' ? 'arrowDown' : 'arrowUp', color: t.accent, text: marker.text, size: 1.6 })
@@ -237,7 +277,7 @@ export default function PriceChart({ bars, showCount, overlays, layers, keyZones
     mk.sort((a, b) => (a.time as number) - (b.time as number))
     markers.current?.setMarkers(mk)
     prim.current.setShapes({ rects, segs })
-  }, [bars, showCount, overlays, layers, keyZones, selectedZone, marker, theme])
+  }, [bars, showCount, overlays, layers, keyZones, selectedZone, marker, theme, setupView, showOccurrences])
 
   // live forming candle: append/update after the last closed bar (never during replay)
   useEffect(() => {

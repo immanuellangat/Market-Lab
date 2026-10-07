@@ -10,6 +10,12 @@ const STATUS_HELP: Record<string, string> = {
   promising: 'Positive on unseen data, but not yet statistically conclusive — needs more occurrences.',
   failed: 'Looked good in-sample but did not hold up on unseen data. Kept for transparency.',
 }
+
+/** Open the chart at the latest candle with this pattern drawn on it. */
+const patternSetup = (r: PatternRow, name: string) => ({
+  symbol: r.symbol, tf: r.tf, time: Math.floor(Date.now() / 1000), replay: false,
+  setup: { conditions: r.conditions, direction: r.direction, name, target_r: r.target_r, stop_atr: r.stop_atr, cooldown: r.cooldown },
+})
 const statusCls = (s: string) => (s === 'validated' ? 'bull' : s === 'promising' ? 'warn' : 'bear')
 
 export default function PatternsPage({ theme }: { theme: string }) {
@@ -40,6 +46,7 @@ export default function PatternsPage({ theme }: { theme: string }) {
 
 // ------------------------------------------------------------------ library
 function Library({ onOpen, onRun }: { onOpen: (id: number) => void; onRun: () => void }) {
+  const { openChartAt } = useApp()
   const { meta } = useApp()
   const [rows, setRows] = useState<PatternRow[] | null>(null)
   const [f, setF] = useState({ symbol: '', tf: '', direction: '', status: 'validated,promising', min_n: 0 })
@@ -92,7 +99,7 @@ function Library({ onOpen, onRun }: { onOpen: (id: number) => void; onRun: () =>
           <table className="t num">
             <thead><tr>
               <th>Grade</th><th>Pattern</th><th>Market</th><th>Status</th>
-              {head('n_all', 'n')}{head('win_rate', 'Win')}{head('avg_r', 'Avg R')}{head('oos_avg_r', 'Unseen avg R')}{head('oos_n', 'Unseen n')}{head('profit_factor', 'PF')}{head('stability', 'Stable yrs')}{head('score', 'Score')}
+              {head('n_all', 'n')}{head('win_rate', 'Win')}{head('avg_r', 'Avg R')}{head('oos_avg_r', 'Unseen avg R')}{head('oos_n', 'Unseen n')}{head('profit_factor', 'PF')}{head('stability', 'Stable yrs')}{head('score', 'Score')}<th />
             </tr></thead>
             <tbody>
               {shown.map(r => (
@@ -112,6 +119,8 @@ function Library({ onOpen, onRun }: { onOpen: (id: number) => void; onRun: () =>
                   <td className="r">{fmt.num(r.profit_factor)}</td>
                   <td className="r">{r.stability === null ? '—' : fmt.pct(r.stability, 0)}</td>
                   <td className="r">{r.score}</td>
+                  <td className="r"><button className="btn sm" title="Show this pattern on the chart: its conditions now and every past occurrence"
+                    onClick={e => { e.stopPropagation(); openChartAt(patternSetup(r, r.conditions.map(lbl).join(' + '))) }}>View on chart</button></td>
                 </tr>
               ))}
             </tbody>
@@ -281,7 +290,8 @@ function PatternView({ id, theme, onBack }: { id: number; theme: string; onBack:
   const d = p.data
   return (
     <div className="page">
-      <div className="row"><button className="btn sm" onClick={onBack}>← All patterns</button></div>
+      <div className="row"><button className="btn sm" onClick={onBack}>← All patterns</button>
+        <button className="btn sm primary" onClick={() => openChartAt(patternSetup(p, d.labels.join(' + ')))}>View on chart</button></div>
       <div className="panel">
         <div className="panel-body row" style={{ alignItems: 'flex-start', gap: 14 }}>
           <div className={`grade ${p.grade}`}>{p.grade}</div>
@@ -317,7 +327,7 @@ function PatternView({ id, theme, onBack }: { id: number; theme: string; onBack:
         </div>
       )}
 
-      <ComparePanel p={p} onStart={() => discovery.compare(p.id).then(load)} onOpen={(s, t) => openChartAt({ symbol: s, tf: t, time: Date.now() / 1000, replay: false })} />
+      <ComparePanel p={p} onStart={() => discovery.compare(p.id).then(load)} onOpen={(s, t) => openChartAt({ symbol: s, tf: t, time: Math.floor(Date.now() / 1000), replay: false })} />
 
       <div className="row">
         <h3 style={{ fontSize: 14 }}>Full analysis</h3>

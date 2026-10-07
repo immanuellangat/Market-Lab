@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { api, live, type Bars, type Bias, type KeyZones, type Overlays, type QuickStats, type TradeZone } from '../api'
+import { api, live, type Bars, type Bias, type KeyZones, type Overlays, type QuickStats, type SetupRef, type SetupView, type TradeZone } from '../api'
 import PriceChart, { type Layers } from '../chart/PriceChart'
 import { TZ_LABEL, fmt, useApp } from '../state'
 
@@ -11,7 +11,7 @@ const WINDOW = 4000      // bars loaded for normal browsing
 const REPLAY_AHEAD = 1500 // future bars pre-loaded (hidden) for replay
 
 export default function ChartPage({ theme }: { theme: string }) {
-  const { meta, symbol, setSymbol, tf, setTf, focus, clearFocus } = useApp()
+  const { meta, symbol, setSymbol, tf, setTf, focus, clearFocus, openChartAt } = useApp()
   const [bars, setBars] = useState<Bars | null>(null)
   const [overlays, setOverlays] = useState<Overlays | null>(null)
   const [zones, setZones] = useState<KeyZones | null>(null)
@@ -27,6 +27,10 @@ export default function ChartPage({ theme }: { theme: string }) {
   const [marker, setMarker] = useState<{ index: number; text: string; dir?: string } | null>(null)
   const [inspect, setInspect] = useState<{ index: number; time: number; conditions: { id: string; label: string; category: string; bias: Bias }[] } | null>(null)
   const [pickStart, setPickStart] = useState(false)
+  // a watched / discovered setup drawn on the chart
+  const [setupRef, setSetupRef] = useState<SetupRef | null>(null)
+  const [setupView, setSetupView] = useState<SetupView | null>(null)
+  const [showOcc, setShowOcc] = useState(true)
 
   const [zoneStats, setZoneStats] = useState<Record<string, QuickStats> | null>(null)
   useEffect(() => { setZoneStats(null); api.zoneStats(symbol, tf).then(setZoneStats).catch(() => {}) }, [symbol, tf])
@@ -51,6 +55,7 @@ export default function ChartPage({ theme }: { theme: string }) {
   useEffect(() => {
     if (focus) return
     setReplay(false); setCursor(null); setMarker(null); setSelZone(null); setInspect(null)
+    setSetupRef(null); setSetupView(null)
     load()
   }, [symbol, tf]) // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -61,13 +66,24 @@ export default function ChartPage({ theme }: { theme: string }) {
       const { index } = await api.indexOf(focus.symbol, focus.tf, focus.time)
       const b = await load(index + REPLAY_AHEAD)
       if (!b) return
-      setMarker({ index, text: focus.label ?? 'Setup', dir: focus.direction })
+      setMarker(focus.setup ? null : { index, text: focus.label ?? 'Setup', dir: focus.direction })
       setSelZone(null)
+      setSetupRef(focus.setup ?? null); setSetupView(null)
+      // declutter so the setup stands out (layers can be switched back on in the toolbar)
+      if (focus.setup) setLayers(l => ({ ...l, zones: false, liquidity: false, spent: false }))
       if (focus.replay) { setReplay(true); setCursor(index); setPlaying(false) }
       else { setReplay(false); setCursor(null) }
       clearFocus()
     })().catch(e => setError(String(e.message ?? e)))
   }, [focus, symbol, tf]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  // setup view: refreshed whenever a new candle closes
+  useEffect(() => {
+    if (!setupRef || !bars) return
+    let stop = false
+    api.setupView({ ...setupRef, symbol, tf }).then(v => { if (!stop) setSetupView(v) }).catch(e => { if (!stop) setError((e as Error).message) })
+    return () => { stop = true }
+  }, [setupRef, bars?.total, symbol, tf]) // eslint-disable-line react-hooks/exhaustive-deps
 
   // live forming candle every 2 s, so the chart moves with the market (display only)
   const [liveBar, setLiveBar] = useState<{ time: number; open: number; high: number; low: number; close: number; closes_at: number } | null>(null)
@@ -171,7 +187,8 @@ export default function ChartPage({ theme }: { theme: string }) {
       <div className="chart-layout">
         <div className="panel" style={{ display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
           <PriceChart bars={bars} showCount={showCount} overlays={overlays} layers={layers} keyZones={zones}
-            selectedZone={selZone} marker={marker} theme={theme} liveBar={liveBar} zoneStats={zoneStats} onBarClick={onBarClick} />
+            selectedZone={selZone} marker={marker} theme={theme} liveBar={liveBar} zoneStats={zoneStats} onBarClick={onBarClick}
+            setupView={replay ? null : setupView} showOccurrences={showOcc} />
           <div className="replay-bar">
             {!replay && !pickStart && <button className="btn sm" onClick={startReplay} disabled={!bars}>▶ Replay from a bar…</button>}
             {pickStart && <><span className="chip accent">Click the bar where replay should start</span><button className="btn sm ghost" onClick={() => setPickStart(false)}>Cancel</button></>}
@@ -201,6 +218,9 @@ export default function ChartPage({ theme }: { theme: string }) {
         </div>
 
         <div className="side">
+          {setupRef && <SetupPanel name={setupRef.name} view={setupView} showOcc={showOcc} setShowOcc={setShowOcc}
+            onClose={() => { setSetupRef(null); setSetupView(null) }}
+            onReplay={t => openChartAt({ symbol, tf, time: t, replay: true, label: setupRef.name, direction: setupRef.direction })} />}
           <div className="panel">
             <div className="panel-head">
               <h3>Key trade zones</h3>
@@ -275,4 +295,72 @@ export default function ChartPage({ theme }: { theme: string }) {
 
 function FragmentRow({ a, b, c }: { a: string; b: string; c: string }) {
   return <><span className="muted">{a}</span><span>{b}</span><span className="faint">{c}</span></>
+}
+
+function SetupPanel({ name, view, showOcc, setShowOcc, onClose, onReplay }: {
+  name: string; view: SetupView | null; showOcc: boolean; setShowOcc: (v: boolean) => void
+  onClose: () => void; onReplay: (time: number) => void
+}) {
+  const ready = view && view.met === view.total
+  const st = view?.stats
+  return (
+    <div className="panel">
+      <div className="panel-head">
+        <h3>Setup on chart</h3>
+        <button className="btn sm ghost" onClick={onClose} title="Remove the setup from the chart">✕</button>
+      </div>
+      <div className="panel-body" style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+        <div className="row">
+          {view && <span className={`chip ${view.direction === 'long' ? 'bull' : 'bear'}`}>{view.direction === 'long' ? 'BUY' : 'SELL'}</span>}
+          <b style={{ fontSize: 13 }}>{name}</b>
+        </div>
+        {!view && <span className="small muted row"><span className="spinner" /> checking the latest candle…</span>}
+        {view && (
+          <>
+            <div className="row">
+              <span className={`chip ${ready ? 'bull' : 'warn'}`}>{view.met} of {view.total} conditions met</span>
+              {view.evidence && <span className="chip">Grade {view.evidence.grade}</span>}
+            </div>
+            <div className="small" style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+              {view.checklist.map(c => (
+                <div key={c.id} className="row" style={{ gap: 6 }}>
+                  <span className={c.met ? 'pos' : 'faint'}>{c.met ? '✓' : '✗'}</span>
+                  <span className={c.met ? '' : 'muted'}>{c.label}</span>
+                  {c.level !== null && <span className="faint num">· {c.level_label} {fmt.price(c.level)}</span>}
+                  {c.zone && <span className="faint num">· zone {fmt.price(c.zone.bottom)}–{fmt.price(c.zone.top)}</span>}
+                </div>
+              ))}
+            </div>
+            <div className={`small ${ready ? 'pos' : 'muted'}`}>
+              {ready
+                ? 'All conditions are met on the latest closed candle — this is a signal (see Live signals for entry, stop and target).'
+                : 'Waiting — NOT a signal. The tested edge only exists when every condition is met on a closed candle.'}
+            </div>
+            <div className="small faint">Lines: solid green = met, amber dashed = not yet. FVG / order-block conditions show the nearest active zone as a box (where the retest would happen). Conditions without a price (day, session, volatility, higher-timeframe state) are drawn as labelled marker lines just above price.</div>
+            {st && st.n > 0 && (
+              <div className="small muted">History: <span className="num">{fmt.int(st.n)}</span> past trades · win <span className="num">{fmt.pct(st.win_rate, 0)}</span> · avg <span className={`num ${(st.avg_r ?? 0) >= 0 ? 'pos' : 'neg'}`}>{fmt.r(st.avg_r)}</span></div>
+            )}
+            <label className="row small" style={{ gap: 6, cursor: 'pointer' }}>
+              <input type="checkbox" checked={showOcc} onChange={e => setShowOcc(e.target.checked)} />
+              Show past occurrences (green = win, red = loss)
+            </label>
+            {view.occurrences.length > 0 && (
+              <table className="t num">
+                <thead><tr><th>Recent occurrence</th><th className="r">Result</th><th /></tr></thead>
+                <tbody>
+                  {view.occurrences.slice(0, 8).map(o => (
+                    <tr key={o.time}>
+                      <td>{fmt.local(o.time)}</td>
+                      <td className={`r ${o.r >= 0 ? 'pos' : 'neg'}`}>{fmt.r(o.r)}</td>
+                      <td className="r"><button className="btn sm" onClick={() => onReplay(o.time)}>Replay</button></td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            )}
+          </>
+        )}
+      </div>
+    </div>
+  )
 }
