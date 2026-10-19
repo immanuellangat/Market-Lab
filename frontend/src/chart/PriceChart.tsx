@@ -384,7 +384,7 @@ export default function PriceChart({ bars, showCount, overlays, layers, keyZones
     <div className="chart-wrap">
       <div className="chart-legend num">{legend}</div>
       {hover && bars && <ZoneTip h={hover} bars={bars} stats={zoneStats?.[hover.zone.kind]} />}
-      {!hover && hoverLvl && bars && <LevelTip h={hoverLvl} bars={bars} />}
+      {!hover && hoverLvl && bars && <LevelTip h={hoverLvl} bars={bars} stats={zoneStats} />}
       <div ref={box} className="chart-box" />
     </div>
   )
@@ -433,7 +433,31 @@ const SD_PATTERN: Record<string, string> = {
   base: 'base before an impulsive move',
 }
 
-function LevelTip({ h, bars }: { h: { z: SdZone | SrZone; x: number; y: number }; bars: Bars }) {
+type StudyInfo = { tests: number; validated: number; pooled_tests: number; pooled_validated: number }
+
+/** this market's record of the zone type (first retests / tests, 1 ATR stop, 2R) and the all-market study verdict */
+function ZoneRecord({ stats, label, all }: { stats?: QuickStats; label: string; all?: Record<string, QuickStats> | null }) {
+  const study = (all as unknown as Record<string, StudyInfo> | null | undefined)?._sdsr_study
+  return (
+    <>
+      {stats && stats.n > 0 && (
+        <div className="num" style={{ marginTop: 4 }}>
+          History ({label}): {fmt.int(stats.n)} trades · win {fmt.pct(stats.win_rate, 0)} ·{' '}
+          <span className={(stats.avg_r ?? 0) >= 0 ? 'pos' : 'neg'}>{fmt.r(stats.avg_r)}</span> (unseen {fmt.r(stats.oos_avg_r)}) · grade {stats.grade}
+        </div>
+      )}
+      {study && (
+        <div className="small" style={{ color: study.validated + study.pooled_validated ? 'var(--bull)' : 'var(--warn)' }}>
+          {study.validated + study.pooled_validated
+            ? `Zone study: ${study.validated + study.pooled_validated} rule(s) validated`
+            : `Zone study: no supply/demand or support/resistance rule validated (${fmt.int(study.tests + study.pooled_tests)} tests, 6 markets)`}
+        </div>
+      )}
+    </>
+  )
+}
+
+function LevelTip({ h, bars, stats }: { h: { z: SdZone | SrZone; x: number; y: number }; bars: Bars; stats?: Record<string, QuickStats> | null }) {
   const z = h.z
   const t = (g: number) => {
     const k = g - bars.first_index
@@ -448,14 +472,18 @@ function LevelTip({ h, bars }: { h: { z: SdZone | SrZone; x: number; y: number }
         <div className="num">{range} · {z.touches} swing {sup ? 'lows/highs' : 'highs/lows'} · {z.inside ? 'price is in the zone' : `${fmt.num(z.distance_atr, 1)} ATR from price`}</div>
         {!z.inside && <div className="num">Chance price reaches it within {z.horizon} bars: <b>{Math.round(z.p_reach * 100)}%</b></div>}
         <div className="muted">From how far price moved within {z.horizon} bars in the last {fmt.int(z.sample)} bars of this market. Reaching ≠ holding.</div>
+        <ZoneRecord stats={stats?.[z.kind]} label={`${bars.symbol} ${bars.tf}, ${sup ? 'support' : 'resistance'} tests`} all={stats} />
         <div className="muted">First touch {t(z.start)} · last {t(z.last)}{z.flip ? ' · has acted as both support and resistance' : ''}</div>
       </div>
     )
   }
-  return <SdTip z={z as SdZone} x={h.x} y={h.y} range={range} t={t} />
+  const sd = z as SdZone
+  const rec = stats?.[sd.pattern] ?? stats?.[sd.kind]
+  return <SdTip z={sd} x={h.x} y={h.y} range={range} t={t}
+    record={<ZoneRecord stats={rec} label={`${bars.symbol} ${bars.tf}, ${stats?.[sd.pattern] ? sd.pattern : sd.kind} first retests`} all={stats} />} />
 }
 
-function SdTip({ z, x, y, range, t }: { z: SdZone; x: number; y: number; range: string; t: (g: number) => string }) {
+function SdTip({ z, x, y, range, t, record }: { z: SdZone; x: number; y: number; range: string; t: (g: number) => string; record: React.ReactNode }) {
   const dem = z.kind === 'demand'
   return (
     <div className="zone-tip" style={{ left: x + 16, top: Math.max(4, y - 10) }}>
@@ -466,6 +494,7 @@ function SdTip({ z, x, y, range, t }: { z: SdZone; x: number; y: number; range: 
       <div className="muted">{SD_PATTERN[z.pattern] ?? z.pattern}</div>
       <div className="num">Formed {t(z.formed)} · {range}{z.touches ? ` · price returned ${z.touches}×` : ' · price has not returned'}</div>
       {z.end !== null && <div className="muted">Broken {t(z.end)} (a candle closed through it)</div>}
+      {record}
     </div>
   )
 }

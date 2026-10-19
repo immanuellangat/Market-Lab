@@ -15,7 +15,7 @@ Local price-action research platform (see README.md for features and layout).
   Server clock = New York + 7h; MT5 request bounds are in server time (fetch extends end by +1 day).
 - Shortcuts: Desktop / Start menu / Startup "Market Lab.lnk" → `start.bat` (opens Chrome `--app` window); MT5 also in Startup.
 - GitHub: https://github.com/immanuellangat/Market-Lab (HTTPS remote; commit as `immanuellangat <immanuellangat9557@gmail.com>`).
-  Only commit/push when the user asks. Everything up to commit 7b42b16 (2026-10-07, entry zones + risk calculator) is pushed.
+  Only commit/push when the user asks. Everything up to commit 80692d9 (2026-10-19, portfolio, win-rate study, S/D + S/R zones, position boxes) is pushed.
 
 ## Working principles the user has accepted
 - Honest statistics: in-sample vs out-of-sample split (last 30% unseen), purged split, costs included,
@@ -83,7 +83,7 @@ with the other watches (10-20% time together, weekly corr ~0). Without the CRT/S
      = 1344 rules, ~1M trades. 0 validated. M5/M15: gross ~0, costs make every setup lose (-0.1..-0.6R) — LTF is dead
      for these concepts with this broker's spreads. Best = H1 SMC (live #11/#12). No PA rule held out-of-sample.
      User asked: SMC on H1 only. APA = plain price action.
-   - Alchemist: rules unknown — ask the user to describe them; do NOT invent rules.
+   - Alchemist: rules unknown — the user said (2026-10-19) they will send a description; do NOT invent rules.
 2. DONE 2026-10-07: Portfolio page (sidebar "Portfolio", `pages/PortfolioPage.tsx`, `GET/POST /api/execution/portfolio`,
    last result in setting `portfolio_last`). Includes CRT/SMC strategy watches (`portfolio._strategy_trades`).
    Result (active watches, 1% risk): all history CAGR 42% / max DD 21%; unseen-only CAGR 51% / max DD 9%;
@@ -104,6 +104,21 @@ with the other watches (10-20% time together, weekly corr ~0). Without the CRT/S
    target/entry_time/exit_time: `routes._position` for patterns, CRT trade dict, SMC `collect` columns). Projected
    setup (entry zone) and selected key trade zone: drawn after the last candle; chart rightOffset 40 while shown.
    Checked: drawn exits match backtest win/loss on 782 trades.
+2d. DONE 2026-10-19: S/D + S/R zones BACKTESTED. 14 conditions (category "Supply/demand", "Support/resistance":
+   demand/supply_retest (+ _rev DBR/RBD, _cont RBR/DBD), in_demand/in_supply, support/resistance_test (+ _strong 3+
+   touches, _flip)) computed per bar in `sdsr.add_sdsr` (FEATURE_VERSION 4 -> 5; S/D zones expire after 1500 bars;
+   S/R test = fresh arrival at nearest band). Study `research/sdsr_study.py` (setting `sdsr_study`): 6 markets x
+   M15/H1/H4 x 3 exits (1ATR/2R, 2ATR/1R, 1.5ATR/3R): 756 per-market + 126 pooled tests -> 0 VALIDATED (BH q<=0.10).
+   Best pooled: RBR demand retest H1 1ATR/2R unseen +0.18R (random long same period -0.04R) but in-sample -0.08R,
+   q=0.44 -> a lead only, nothing added live. M15 negative (costs). Chart tooltips show per-market record + verdict
+   (`/zone_stats` keys demand/supply/RBR/DBR/DBD/RBD/support/resistance + `_sdsr_study`).
+2e. DONE 2026-10-19: Forward-test scoreboard (sidebar "Forward tests", `live/scoreboard.py`, `GET /api/live/scoreboard`).
+   Rebuilds each watch's trades (portfolio._setup_trades) on candles after "forward since" (= created; #17-#20 =
+   2026-10-07 when the CRT/SMC rules were chosen; override via setting `forward_since` {id: unix}). Expected = unseen
+   backtest trades before that date. Checks: binomial win rate, normal R/trade, Poisson signal count (5%); verdict
+   needs 10+ trades. First run: 3 forward trades (#16 +1.95R, #18 -1.04R, #19 +1.96R), all "too early"; #7 had 0
+   signals vs ~4 expected. NOTE: signals table is empty since the 2026-10-17 reset and the scanner only checks the
+   newest candle when new bars arrive, so signals that fire while the app is closed are never alerted ("missed").
 3. Optional: show recently filled zones (last ~50 candles) by default on the chart.
 4. DONE 2026-10-07: "View on chart" for watched setups (Live page) and discovered patterns (library row + pattern page).
    `/api/setup_view` -> checklist (met/not, price level where one exists via `_LEVEL_OF`/`_PD_FRACTION` in routes.py)

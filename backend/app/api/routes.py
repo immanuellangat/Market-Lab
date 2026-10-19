@@ -208,9 +208,20 @@ def zone_stats(symbol: str, tf: str):
     """Historical first-retest record of each zone type on this market (for chart tooltips)."""
     from ..research.hypothesis import quick_stats
     _load(symbol, tf)
+    from ..research import sdsr_study
     setups = {"fvg_bull": ("fvg_bull_retest", "long"), "fvg_bear": ("fvg_bear_retest", "short"),
-              "ob_bull": ("ob_bull_retest", "long"), "ob_bear": ("ob_bear_retest", "short")}
-    return _clean({k: quick_stats(symbol, tf, [c], d) for k, (c, d) in setups.items()})
+              "ob_bull": ("ob_bull_retest", "long"), "ob_bear": ("ob_bear_retest", "short"),
+              # supply / demand (by pattern too) and support / resistance (features/sdsr.py)
+              "demand": ("demand_retest", "long"), "supply": ("supply_retest", "short"),
+              "RBR": ("demand_retest_cont", "long"), "DBR": ("demand_retest_rev", "long"),
+              "DBD": ("supply_retest_cont", "short"), "RBD": ("supply_retest_rev", "short"),
+              "support": ("support_test", "long"), "resistance": ("resistance_test", "short")}
+    out = {k: quick_stats(symbol, tf, [c], d) for k, (c, d) in setups.items()}
+    st = sdsr_study.latest()
+    if st:
+        out["_sdsr_study"] = {"finished": st["finished"], "tests": st["tests"], "validated": len(st["validated"]),
+                              "pooled_tests": st["pooled_tests"], "pooled_validated": len(st["pooled_validated"])}
+    return _clean(out)
 
 
 @router.get("/zones")

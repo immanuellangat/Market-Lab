@@ -149,6 +149,13 @@ def add_watch(req: WatchReq):
     return _clean(db.get_watch(wid))
 
 
+@router.get("/scoreboard")
+def scoreboard(force: bool = False):
+    """Forward-test scoreboard: each watch's trades since its rule was chosen vs its unseen backtest."""
+    from ..live import scoreboard as sb
+    return _clean(sb.scoreboard(force))
+
+
 @router.get("/watchlist")
 def list_watch():
     rows = db.list_watches()

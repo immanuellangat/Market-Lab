@@ -89,6 +89,22 @@ def _catalog() -> list[Condition]:
     add("ob_bull_retest", "Bullish order block retest", "Order block", "bull", "First return into a bullish order block that holds.", col("ob_bull_retest"))
     add("ob_bear_retest", "Bearish order block retest", "Order block", "bear", "First return into a bearish order block that holds.", col("ob_bear_retest"))
 
+    # ---------------- supply / demand and support / resistance (features/sdsr.py)
+    add("demand_retest", "Demand zone first retest", "Supply/demand", "bull", "First return into an unbroken demand zone (base before a rally) that holds.", col("demand_retest"))
+    add("supply_retest", "Supply zone first retest", "Supply/demand", "bear", "First return into an unbroken supply zone (base before a drop) that holds.", col("supply_retest"))
+    add("demand_retest_rev", "Demand (DBR) first retest", "Supply/demand", "bull", "First retest of a reversal demand zone: drop - base - rally.", col("demand_retest_rev"))
+    add("demand_retest_cont", "Demand (RBR) first retest", "Supply/demand", "bull", "First retest of a continuation demand zone: rally - base - rally.", col("demand_retest_cont"))
+    add("supply_retest_rev", "Supply (RBD) first retest", "Supply/demand", "bear", "First retest of a reversal supply zone: rally - base - drop.", col("supply_retest_rev"))
+    add("supply_retest_cont", "Supply (DBD) first retest", "Supply/demand", "bear", "First retest of a continuation supply zone: drop - base - drop.", col("supply_retest_cont"))
+    add("in_demand", "Trading inside demand zone", "Supply/demand", "bull", "This bar traded inside an unbroken demand zone.", col("in_demand"))
+    add("in_supply", "Trading inside supply zone", "Supply/demand", "bear", "This bar traded inside an unbroken supply zone.", col("in_supply"))
+    add("support_test", "Support test that holds", "Support/resistance", "bull", "Price arrives at the nearest support band (2+ swings) and closes above its bottom.", col("support_test"))
+    add("resistance_test", "Resistance test that holds", "Support/resistance", "bear", "Price arrives at the nearest resistance band (2+ swings) and closes below its top.", col("resistance_test"))
+    add("support_test_strong", "Strong support test (3+ touches)", "Support/resistance", "bull", "Support test at a band with 3 or more swing touches.", col("support_test_strong"))
+    add("resistance_test_strong", "Strong resistance test (3+ touches)", "Support/resistance", "bear", "Resistance test at a band with 3 or more swing touches.", col("resistance_test_strong"))
+    add("support_flip_test", "Support test at a flipped level", "Support/resistance", "bull", "Support test at a band that has held both swing highs and lows (role reversal).", col("support_flip_test"))
+    add("resistance_flip_test", "Resistance test at a flipped level", "Support/resistance", "bear", "Resistance test at a band that has held both swing highs and lows (role reversal).", col("resistance_flip_test"))
+
     # ---------------- momentum / candles
     add("rsi_os", "RSI oversold (< 30)", "Momentum", "bull", "RSI(14) below 30.", lambda d: d["rsi"] < 30)
     add("rsi_ob", "RSI overbought (> 70)", "Momentum", "bear", "RSI(14) above 70.", lambda d: d["rsi"] > 70)

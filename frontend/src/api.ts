@@ -135,6 +135,20 @@ export interface SetupView {
 }
 
 // ------------------------------------------------------------------ live
+// forward-test scoreboard (/api/live/scoreboard)
+export interface ScoreStats { n: number; wins?: number; win_rate?: number; avg_r?: number; total_r?: number; per_month?: number; sd_r?: number | null; expected_signals?: number }
+export interface ScoreRow {
+  id: number; name: string; symbol: string; tf: string; direction: string; active: boolean; plan: string | null
+  since: number; days: number; expected: ScoreStats; forward: ScoreStats; open: number; verdict: string
+  checks: { check: string; ok: boolean; p: number | null; text: string }[]
+  alerts: { sent: number; matched: number; missed: number }
+  trades: { entry_time: number; exit_time: number; r: number; direction?: string; exit?: string; closed: boolean }[]
+}
+export interface Scoreboard {
+  as_of: number; watches: ScoreRow[]; rule: string; errors: { id: number; error: string }[]
+  total: { n: number; avg_r: number | null; total_r: number; win_rate: number | null }
+}
+
 export interface Evidence { score: number; grade: string; reasons: string[] }
 export interface Decay { status: string; message: string; recent_avg_r?: number; earlier_avg_r?: number; recent_n?: number }
 export interface WatchStats {
@@ -185,6 +199,7 @@ export const live = {
   status: () => req<LiveStatus>('/api/live/status'),
   toggle: (enabled: boolean) => post<{ enabled: boolean }>('/api/live/toggle', { enabled }),
   scanNow: () => post<{ new_signals: number }>('/api/live/scan_now', {}),
+  scoreboard: (force = false) => req<Scoreboard>(`/api/live/scoreboard${force ? '?force=true' : ''}`),
   watchlist: () => req<Watch[]>('/api/live/watchlist'),
   addWatch: (w: WatchRequest) => post<Watch>('/api/live/watchlist', w),
   patchWatch: (id: number, p: { active?: boolean; name?: string }) => send<Watch>('PATCH', `/api/live/watchlist/${id}`, p),

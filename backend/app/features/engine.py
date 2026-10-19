@@ -21,6 +21,7 @@ import pandas as pd
 from ..config import FEATURE_VERSION, FEATURES_DIR, HTF_CONTEXT, TIMEFRAMES
 from ..data.store import atomic_write, bars_path, load_bars
 from .indicators import add_indicators
+from .sdsr import add_sdsr
 from .sessions import add_sessions
 from .structure import Records, add_structure
 
@@ -43,6 +44,7 @@ def compute_features(bars: pd.DataFrame, tf: str, htf_frames: dict[str, pd.DataF
     df = add_indicators(bars.reset_index(drop=True))
     df = add_sessions(df, TIMEFRAMES[tf])
     df, rec = add_structure(df, SWING_K[tf])
+    df = add_sdsr(df, rec.swings)
     for htf, hdf in htf_frames.items():
         df = merge_htf(df, tf, hdf, htf)
     return df, rec
