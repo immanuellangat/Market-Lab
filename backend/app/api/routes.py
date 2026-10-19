@@ -12,6 +12,7 @@ from ..config import DEFAULT_HORIZON, DEFAULT_STOP_ATR, SYMBOLS, TARGETS_R, TIME
 from ..data import store
 from ..data.mt5_source import MT5Error, source
 from ..features import engine
+from ..features.sdsr import supply_demand, support_resistance
 from ..features.sessions import SESSIONS
 from ..features.structure import FVG_EXPIRY, OB_EXPIRY
 from ..research.conditions import CATALOG
@@ -197,7 +198,9 @@ def overlays(symbol: str, tf: str, from_i: int, to_i: int):
     pools = [{"kind": p["kind"], "start": p["start"], "level": p["level"],
               "end": p["end"] if p["end"] is not None and p["end"] <= to_i else None}
              for p in rec.pools if p["start"] <= to_i and (p["end"] is None or p["end"] >= from_i)]
-    return {"zones": zones[-400:], "swings": swings, "events": events, "pools": pools}
+    sd = [{k: (_f(v) if isinstance(v, float) else v) for k, v in z.items()} for z in supply_demand(df, from_i, to_i)]
+    sr = support_resistance(df, rec.swings, to_i, DEFAULT_HORIZON.get(tf, 48))
+    return {"zones": zones[-400:], "swings": swings, "events": events, "pools": pools, "sd_zones": sd, "sr_zones": sr}
 
 
 @router.get("/zone_stats")
@@ -309,6 +312,31 @@ def _entry_zone(df, checklist: list[dict], occ: list[dict], direction: str, stop
                   "stop_atr": stop_atr, "target_r": target_r}
 
 
+def _position(df, i: int, direction: str, stop_atr: float, target_r: float, horizon: int) -> dict:
+    """Entry / stop / target and entry / exit time of a past trade, for drawing it as a position box.
+    Same rules as the backtest: enter at the next open, stop checked first when one candle hits both,
+    otherwise closed after `horizon` bars."""
+    n = len(df)
+    if i + 1 >= n:
+        return {}
+    o, h, l = df["open"].to_numpy(), df["high"].to_numpy(), df["low"].to_numpy()
+    entry, risk = float(o[i + 1]), float(stop_atr * df["atr"].iloc[i])
+    if not np.isfinite(risk) or risk <= 0:
+        return {}
+    sg = 1 if direction == "long" else -1
+    stop, target = entry - sg * risk, entry + sg * target_r * risk
+    last = min(n - 1, i + horizon)
+    j = last
+    for k in range(i + 1, last + 1):
+        hit_stop = l[k] <= stop if sg > 0 else h[k] >= stop
+        hit_tgt = h[k] >= target if sg > 0 else l[k] <= target
+        if hit_stop or hit_tgt:
+            j = k
+            break
+    t = _unix(df["time"].iloc[[i + 1, j]])
+    return {"entry": entry, "stop": stop, "target": target, "entry_time": int(t[0]), "exit_time": int(t[1])}
+
+
 @router.get("/setup_view")
 def setup_view(symbol: str, tf: str, conditions: str, direction: str = "long", target_r: float = 2.0,
                stop_atr: float = DEFAULT_STOP_ATR, cooldown: int = 5):
@@ -344,7 +372,8 @@ def setup_view(symbol: str, tf: str, conditions: str, direction: str = "long", t
             item["level_label"] = f"{fr:.0%} of swing range"
         checklist.append(item)
     res = run_test(symbol, tf, ids, direction, target_r, stop_atr, cooldown=cooldown, max_examples=400)
-    occ = [{"i": e["i"], "time": e["time"], "r": e["r"], "outcome": e["outcome"], "oos": e["oos"]} for e in res.get("examples", [])]
+    occ = [{"i": e["i"], "time": e["time"], "r": e["r"], "outcome": e["outcome"], "oos": e["oos"]}
+           | _position(df, e["i"], direction, stop_atr, target_r, res["params"]["horizon"]) for e in res.get("examples", [])]
     return _clean({
         "symbol": symbol, "tf": tf, "direction": direction, "index": i, "time": int(row["time"].timestamp()),
         "close": float(row["close"]), "atr": float(row["atr"]), "checklist": checklist,

@@ -22,7 +22,7 @@ def signal_spec(plan: Plan, df: pd.DataFrame, i: int, direction: str) -> dict:
         raw = float(df["low"].iloc[lo: i + 1].min() - 0.1 * a) if long else float(df["high"].iloc[lo: i + 1].max() + 0.1 * a)
         spec["stop"] = {"mode": "struct", "level": raw}
     else:
-        spec["stop"] = {"mode": "atr", "k": 1.5 if plan.stop == "atr1.5" else 1.0}
+        spec["stop"] = {"mode": "atr", "k": plan.stop_atr if plan.stop.startswith("atr") else 1.0}
     if plan.target == "none":
         spec["target"] = {"mode": "none"}
     elif plan.target == "liq":

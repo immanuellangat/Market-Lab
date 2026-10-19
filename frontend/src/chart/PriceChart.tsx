@@ -3,11 +3,11 @@ import {
   CandlestickSeries, ColorType, CrosshairMode, LineSeries, LineStyle, LineType, createChart, createSeriesMarkers,
   type IChartApi, type ISeriesApi, type ISeriesMarkersPluginApi, type SeriesMarker, type Time, type UTCTimestamp,
 } from 'lightweight-charts'
-import type { Bars, KeyZones, Overlays, QuickStats, SetupView, TradeZone, Zone } from '../api'
+import type { Bars, KeyZones, Overlays, QuickStats, SdZone, SetupView, SrZone, TradeZone, Zone } from '../api'
 import { TZ_LABEL, TZ_OFFSET, fmt } from '../state'
 import { OverlayPrimitive, type Rect, type Seg } from './overlayPrimitive'
 
-export interface Layers { fvg: boolean; ob: boolean; spent: boolean; structure: boolean; swings: boolean; liquidity: boolean; levels: boolean; zones: boolean }
+export interface Layers { fvg: boolean; ob: boolean; spent: boolean; structure: boolean; swings: boolean; liquidity: boolean; levels: boolean; zones: boolean; sd: boolean; sr: boolean }
 
 interface Props {
   bars: Bars | null
@@ -56,7 +56,9 @@ export default function PriceChart({ bars, showCount, overlays, layers, keyZones
   const barsRef = useRef(bars)
   const [legend, setLegend] = useState<string>('')
   const [hover, setHover] = useState<{ zone: Zone; x: number; y: number } | null>(null)
+  const [hoverLvl, setHoverLvl] = useState<{ z: SdZone | SrZone; x: number; y: number } | null>(null)
   const zoneById = useRef<Record<string, Zone>>({})
+  const lvlById = useRef<Record<string, SdZone | SrZone>>({})
   clickRef.current = onBarClick
   barsRef.current = bars
 
@@ -88,6 +90,8 @@ export default function PriceChart({ bars, showCount, overlays, layers, keyZones
       const hitId = p.point ? prim.current.hitTestAt(p.point.x, p.point.y) : null
       const hz = hitId ? zoneById.current[hitId] : undefined
       setHover(hz && p.point ? { zone: hz, x: p.point.x, y: p.point.y } : null)
+      const hl = hitId ? lvlById.current[hitId] : undefined
+      setHoverLvl(hl && p.point ? { z: hl, x: p.point.x, y: p.point.y } : null)
       if (!b || p.logical === undefined || p.logical === null) { setLegend(''); return }
       const i = Math.round(p.logical)
       if (i < 0 || i >= b.time.length) { setLegend(''); return }
@@ -155,6 +159,22 @@ export default function PriceChart({ bars, showCount, overlays, layers, keyZones
     const segs: Seg[] = []
     const mk: SeriesMarker<Time>[] = []
     const timeOf = (g: number) => ct(bars.time[Math.max(0, Math.min(L(g), last))])
+    // local bar index of a unix time (last bar starting at or before it)
+    const barAt = (time: number) => {
+      let lo = 0, hi = last
+      while (lo < hi) { const mid = (lo + hi + 1) >> 1; if (bars.time[mid] <= time) lo = mid; else hi = mid - 1 }
+      return lo
+    }
+    // a long/short position like a trading platform's position tool: green box entry -> target, red box entry -> stop
+    const position = (l1: number, l2: number | 'right', entry: number, stop: number, target: number,
+      o: { strong?: number; tLabel?: string; sLabel?: string; eLabel?: string } = {}) => {
+      const a = o.strong ?? 0.22
+      rects.push({ l1, l2, top: Math.max(entry, target), bottom: Math.min(entry, target), fill: alpha(t.bull, a),
+        stroke: alpha(t.bull, Math.min(1, a * 3)), label: o.tLabel, labelColor: t.bull })
+      rects.push({ l1, l2, top: Math.max(entry, stop), bottom: Math.min(entry, stop), fill: alpha(t.bear, a),
+        stroke: alpha(t.bear, Math.min(1, a * 3)), label: o.sLabel, labelColor: t.bear })
+      if (o.eLabel !== undefined) segs.push({ l1, l2, price: entry, color: t.text, width: 1.5, label: o.eLabel || undefined })
+    }
 
     if (overlays) {
       const byId: Record<string, Zone> = {}
@@ -169,16 +189,49 @@ export default function PriceChart({ bars, showCount, overlays, layers, keyZones
         const id = `z${k}`
         byId[id] = z
         // order blocks: solid border; FVGs: dashed border. Green = bullish, red = bearish.
+        // spent zones: dashed and paler; labelled only when they ended recently (keeps the chart readable)
+        const recent = !fresh && L(z.end!) >= last - 50
         rects.push({
           l1: L(z.start), l2: fresh ? last + 0.5 : L(z.end!),
           top: z.top, bottom: z.bottom,
-          fill: alpha(col, fresh ? (isFvg ? 0.12 : 0.18) : 0.05),
-          stroke: alpha(col, fresh ? (isFvg ? 0.65 : 0.9) : 0.25),
-          dash: isFvg,
-          label: fresh ? (isFvg ? 'FVG' : 'OB') : undefined, labelColor: col, id,
+          fill: alpha(col, fresh ? (isFvg ? 0.12 : 0.18) : 0.09),
+          stroke: alpha(col, fresh ? (isFvg ? 0.65 : 0.9) : 0.5),
+          dash: isFvg || !fresh,
+          label: fresh ? (isFvg ? 'FVG' : 'OB') : recent ? `spent ${isFvg ? 'FVG' : 'OB'}` : undefined, labelColor: alpha(col, fresh ? 1 : 0.75), id,
         })
       })
       zoneById.current = byId
+      const lvl: Record<string, SdZone | SrZone> = {}
+      // support / resistance: light bands, dashed border, drawn first so other zones sit on top
+      if (layers.sr) {
+        overlays.sr_zones.forEach((z, k) => {
+          const sup = z.kind === 'support'
+          const col = sup ? t.bull : t.bear
+          const id = `sr${k}`
+          lvl[id] = z
+          rects.push({ l1: L(Math.max(z.start, off)), l2: 'right', top: z.top, bottom: z.bottom,
+            fill: alpha(col, 0.07), stroke: alpha(col, 0.55), dash: true, id,
+            label: `${sup ? 'Support' : 'Resistance'} · ${z.inside ? 'price in zone' : `${Math.round(z.p_reach * 100)}% reach in ${z.horizon} bars`} · ${z.touches} touches${z.flip ? ' · flip' : ''}`,
+            labelColor: col })
+        })
+      }
+      // supply / demand: filled boxes from the base to where price broke them (or the last bar)
+      if (layers.sd) {
+        overlays.sd_zones.forEach((z, k) => {
+          const fresh = z.end === null
+          if (z.end !== null && (z.end < off || !layers.spent)) return
+          const dem = z.kind === 'demand'
+          const col = dem ? t.bull : t.bear
+          const id = `sd${k}`
+          lvl[id] = z
+          const name = `${dem ? 'Demand' : 'Supply'}${z.pattern !== 'base' ? ` (${z.pattern})` : ''}`
+          rects.push({ l1: L(z.start), l2: fresh ? last + 0.5 : L(z.end!), top: z.top, bottom: z.bottom,
+            fill: alpha(col, fresh ? 0.2 : 0.08), stroke: alpha(col, fresh ? 1 : 0.5), dash: !fresh, id,
+            label: fresh ? `${name} · ${z.status === 'fresh' ? 'fresh' : `tested ${z.touches}×`}` : `broken ${name}`,
+            labelColor: alpha(col, fresh ? 1 : 0.75) })
+        })
+      }
+      lvlById.current = lvl
       if (layers.structure) {
         for (const e of overlays.events) {
           if (e.i < off) continue
@@ -226,10 +279,17 @@ export default function PriceChart({ bars, showCount, overlays, layers, keyZones
     if (selectedZone) {
       const z = selectedZone
       const start = L(Math.max(z.start_i, off))
-      segs.push({ l1: start, l2: 'right', price: z.entry, color: t.accent, width: 1.5, label: `Entry ${fmt.price(z.entry)}` })
-      segs.push({ l1: start, l2: 'right', price: z.stop, color: t.bear, width: 1.5, dash: true, label: `Stop ${fmt.price(z.stop)}` })
-      z.targets.forEach((x, k) => segs.push({ l1: start, l2: 'right', price: x.price, color: t.bull, dash: true,
-        label: `TP${k + 1} ${x.kind} · ${fmt.num(x.rr, 1)}R` }))
+      const pos = last + 1
+      const tp1 = z.targets[0]
+      if (tp1) {
+        position(pos, 'right', z.entry, z.stop, tp1.price, { tLabel: `TP1 ${fmt.price(tp1.price)} · ${tp1.kind} · ${fmt.num(tp1.rr, 1)}R`,
+          sLabel: `Stop ${fmt.price(z.stop)}`, eLabel: `Entry ${fmt.price(z.entry)}` })
+      } else {
+        segs.push({ l1: start, l2: 'right', price: z.entry, color: t.accent, width: 1.5, label: `Entry ${fmt.price(z.entry)}` })
+        segs.push({ l1: start, l2: 'right', price: z.stop, color: t.bear, width: 1.5, dash: true, label: `Stop ${fmt.price(z.stop)}` })
+      }
+      z.targets.slice(1).forEach((x, k) => segs.push({ l1: pos, l2: 'right', price: x.price, color: t.bull, dash: true,
+        label: `TP${k + 2} ${x.kind} · ${fmt.num(x.rr, 1)}R` }))
       z.stat_targets.forEach(x => segs.push({ l1: start, l2: 'right', price: x.price, color: alpha(t.accent, 0.8), dash: true,
         label: `${x.kind} · ${fmt.num(x.rr, 1)}R` }))
     }
@@ -268,8 +328,11 @@ export default function PriceChart({ bars, showCount, overlays, layers, keyZones
         rects.push({ l1, l2: 'right', top: ez.top, bottom: ez.bottom, fill: alpha(t.accent, 0.18), stroke: t.accent,
           label: `Possible entry zone ${fmt.price(ez.bottom)}–${fmt.price(ez.top)}`
             + (ezFromZone ? ` · ${sv.checklist.find(c => c.label === ezFromZone)?.met ? '✓' : '✗'} ${ezFromZone}` : ''), labelColor: t.accent })
-        segs.push({ l1, l2: 'right', price: ez.stop, color: t.bear, dash: true, width: 1.5, label: `Stop ≈ ${fmt.price(ez.stop)} (${typeof ez.stop_atr === 'number' ? `${ez.stop_atr}× ATR` : ez.stop_atr})` })
-        segs.push({ l1, l2: 'right', price: ez.target, color: t.bull, dash: true, width: 1.5, label: `Target ≈ ${fmt.price(ez.target)} (${typeof ez.target_r === 'number' ? `${ez.target_r}R` : ez.target_r})` })
+        const side = sv.direction === 'short' ? 'Short' : sv.direction === 'long' ? 'Long' : ''
+        position(last + 1, 'right', ez.mid, ez.stop, ez.target, {
+          tLabel: `${side ? `${side} · ` : ''}Target ≈ ${fmt.price(ez.target)} (${typeof ez.target_r === 'number' ? `${ez.target_r}R` : ez.target_r})`,
+          sLabel: `Stop ≈ ${fmt.price(ez.stop)} (${typeof ez.stop_atr === 'number' ? `${ez.stop_atr}× ATR` : ez.stop_atr})`,
+          eLabel: `Entry ≈ ${fmt.price(ez.mid)}` })
       }
       if (showOccurrences) {
         const times = bars.time
@@ -281,6 +344,11 @@ export default function PriceChart({ bars, showCount, overlays, layers, keyZones
           if (times[lo] !== o.time) return
           const win = o.r > 0
           const short = (o.direction ?? sv.direction) === 'short'
+          if (k < 80 && o.entry !== undefined && o.stop !== undefined && o.target !== undefined && o.entry_time && o.exit_time) {
+            const e1 = barAt(o.entry_time), e2 = Math.max(barAt(o.exit_time), e1 + 1)
+            position(e1, e2, o.entry, o.stop, o.target, { strong: 0.14,
+              tLabel: k < 40 ? `${short ? 'Short' : 'Long'} ${o.r >= 0 ? '+' : ''}${o.r.toFixed(1)}R` : undefined })
+          }
           mk.push({ time: ct(times[lo]), position: short ? 'aboveBar' : 'belowBar',
             shape: short ? 'arrowDown' : 'arrowUp', color: win ? t.bull : t.bear, size: 1,
             text: k < 40 ? `${o.r >= 0 ? '+' : ''}${o.r.toFixed(1)}R` : undefined })
@@ -296,6 +364,12 @@ export default function PriceChart({ bars, showCount, overlays, layers, keyZones
     prim.current.setShapes({ rects, segs })
   }, [bars, showCount, overlays, layers, keyZones, selectedZone, marker, theme, setupView, showOccurrences])
 
+  // room on the right for a projected position (like a trading platform's position tool)
+  const projecting = !!selectedZone || !!(setupView && setupView.entry_zone.available)
+  useEffect(() => {
+    chart.current?.timeScale().applyOptions({ rightOffset: projecting ? 40 : 8 })
+  }, [projecting])
+
   // live forming candle: append/update after the last closed bar (never during replay)
   useEffect(() => {
     if (!liveBar || !bars || !candles.current) return
@@ -310,6 +384,7 @@ export default function PriceChart({ bars, showCount, overlays, layers, keyZones
     <div className="chart-wrap">
       <div className="chart-legend num">{legend}</div>
       {hover && bars && <ZoneTip h={hover} bars={bars} stats={zoneStats?.[hover.zone.kind]} />}
+      {!hover && hoverLvl && bars && <LevelTip h={hoverLvl} bars={bars} />}
       <div ref={box} className="chart-box" />
     </div>
   )
@@ -349,6 +424,48 @@ function ZoneTip({ h, bars, stats }: { h: { zone: Zone; x: number; y: number }; 
           <span className={(stats.avg_r ?? 0) >= 0 ? 'pos' : 'neg'}>{fmt.r(stats.avg_r)}</span> (unseen {fmt.r(stats.oos_avg_r)}) · grade {stats.grade}
         </div>
       )}
+    </div>
+  )
+}
+
+const SD_PATTERN: Record<string, string> = {
+  RBR: 'rally – base – rally', DBR: 'drop – base – rally', DBD: 'drop – base – drop', RBD: 'rally – base – drop',
+  base: 'base before an impulsive move',
+}
+
+function LevelTip({ h, bars }: { h: { z: SdZone | SrZone; x: number; y: number }; bars: Bars }) {
+  const z = h.z
+  const t = (g: number) => {
+    const k = g - bars.first_index
+    return k >= 0 && k < bars.time.length ? fmt.local(bars.time[k]) : 'earlier'
+  }
+  const range = `${fmt.price(z.bottom)}–${fmt.price(z.top)}`
+  if (z.kind === 'support' || z.kind === 'resistance') {
+    const sup = z.kind === 'support'
+    return (
+      <div className="zone-tip" style={{ left: h.x + 16, top: Math.max(4, h.y - 10) }}>
+        <b style={{ color: sup ? 'var(--bull)' : 'var(--bear)' }}>{sup ? 'Support' : 'Resistance'} zone</b>
+        <div className="num">{range} · {z.touches} swing {sup ? 'lows/highs' : 'highs/lows'} · {z.inside ? 'price is in the zone' : `${fmt.num(z.distance_atr, 1)} ATR from price`}</div>
+        {!z.inside && <div className="num">Chance price reaches it within {z.horizon} bars: <b>{Math.round(z.p_reach * 100)}%</b></div>}
+        <div className="muted">From how far price moved within {z.horizon} bars in the last {fmt.int(z.sample)} bars of this market. Reaching ≠ holding.</div>
+        <div className="muted">First touch {t(z.start)} · last {t(z.last)}{z.flip ? ' · has acted as both support and resistance' : ''}</div>
+      </div>
+    )
+  }
+  return <SdTip z={z as SdZone} x={h.x} y={h.y} range={range} t={t} />
+}
+
+function SdTip({ z, x, y, range, t }: { z: SdZone; x: number; y: number; range: string; t: (g: number) => string }) {
+  const dem = z.kind === 'demand'
+  return (
+    <div className="zone-tip" style={{ left: x + 16, top: Math.max(4, y - 10) }}>
+      <div className="row" style={{ gap: 6 }}>
+        <b style={{ color: dem ? 'var(--bull)' : 'var(--bear)' }}>{dem ? 'Demand' : 'Supply'} zone</b>
+        <span className={`chip ${z.status === 'fresh' ? 'bull' : ''}`}>{z.status}</span>
+      </div>
+      <div className="muted">{SD_PATTERN[z.pattern] ?? z.pattern}</div>
+      <div className="num">Formed {t(z.formed)} · {range}{z.touches ? ` · price returned ${z.touches}×` : ' · price has not returned'}</div>
+      {z.end !== null && <div className="muted">Broken {t(z.end)} (a candle closed through it)</div>}
     </div>
   )
 }

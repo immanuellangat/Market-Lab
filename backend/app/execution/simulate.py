@@ -22,6 +22,11 @@ class Plan:
     manage: str = "none"     # "none" | "be" (break-even at 1R) | "partial" (half at 1R + BE) | "trail"
 
     @property
+    def stop_atr(self) -> float:
+        """ATR multiple of an "atrK" stop (e.g. "atr2" -> 2.0)."""
+        return float(self.stop[3:])
+
+    @property
     def key(self) -> str:
         return f"{self.entry}|{self.stop}|{self.target}|{self.manage}"
 
@@ -32,11 +37,12 @@ class Plan:
 
     def describe(self) -> str:
         e = {"next": "Enter at next candle open", "ltf": "Wait for a lower-timeframe break of structure, then enter"}[self.entry]
-        s = {"atr1": "stop 1×ATR", "atr1.5": "stop 1.5×ATR", "struct": "stop beyond the recent swing",
+        s = {"struct": "stop beyond the recent swing",
              "ltf_swing": "stop beyond the last confirmed lower-timeframe swing",
-             "ltf_pullback": "stop beyond the pullback low/high made since the signal"}[self.stop]
-        t = {"r1.5": "target 1.5R", "r2": "target 2R", "r3": "target 3R", "liq": "target the nearest untaken liquidity",
-             "none": "no fixed target"}[self.target]
+             "ltf_pullback": "stop beyond the pullback low/high made since the signal"}.get(self.stop) \
+            or f"stop {self.stop_atr:g}×ATR"
+        t = {"liq": "target the nearest untaken liquidity", "none": "no fixed target"}.get(self.target) \
+            or f"target {float(self.target[1:]):g}R"
         m = {"none": "", "be": ", stop to break-even at +1R", "partial": ", bank half at +1R and move stop to break-even",
              "trail": ", trail the stop 1.5×ATR behind price after +1R"}[self.manage]
         return f"{e}; {s}; {t}{m}."

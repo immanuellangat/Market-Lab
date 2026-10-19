@@ -39,8 +39,34 @@ def save_settings(s: dict) -> dict:
     return cur
 
 
+def _strategy_trades(w: dict) -> list[dict]:
+    """Historical trades of a CRT / SMC strategy watch, in the simulator's trade format."""
+    from ..research.hypothesis import WARMUP
+    from ..strategies import crt, live as strat
+    if w["plan"].startswith("smc|"):
+        from ..strategies.ltf_search import collect_one
+        r = strat._smc_parse(w["plan"])
+        df = collect_one(w["symbol"], r["tf"], r)
+        return [{"entry_time": int(t.entry_time), "exit_time": int(t.exit_time), "r": float(t.r),
+                 "oos": bool(t.oos), "exit": t.why, "symbol": w["symbol"], "direction": t.direction, "setup": w["id"]}
+                for t in df.itertuples()]
+    from ..features.engine import get_features
+    r = strat.parse(w["plan"])
+    eng = crt.CRT(w["symbol"], r["htf"])
+    flags = strat.setup_filters(eng, get_features(w["symbol"], r["htf"])[0])
+    n = len(eng.ht)
+    sp = WARMUP + int((n - WARMUP) * 0.7)
+    return [{"entry_time": t["entry_time"], "exit_time": t["exit_time"], "r": t["r"], "oos": t["i"] >= sp, "exit": t["exit"],
+             "symbol": w["symbol"], "direction": t["direction"], "setup": w["id"]}
+            for t in eng.trades(r["mode"], target_mode=r["target"])
+            if "r" in t and t["i"] >= WARMUP and strat._passes(flags[(t["i"], t["direction"])], r["filters"])]
+
+
 def _setup_trades(w: dict) -> list[dict]:
-    plan = Plan.from_key(w.get("plan") or BASELINE.key)
+    from ..strategies.live import is_strategy
+    if is_strategy(w):
+        return _strategy_trades(w)
+    plan = Plan.from_key(w.get("plan") or Plan("next", f"atr{w['stop_atr']:g}", f"r{w['target_r']:g}", "none").key)
     if plan.entry != "next":
         plan = BASELINE
     lab = ExecutionLab(w["symbol"], w["tf"], w["conditions"], w["direction"], w["cooldown"])

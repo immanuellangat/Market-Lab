@@ -5,7 +5,7 @@ import RiskCalc from '../RiskCalc'
 import { TZ_LABEL, fmt, useApp } from '../state'
 
 const LAYER_LABELS: [keyof Layers, string][] = [
-  ['zones', 'Trade zones'], ['fvg', 'FVG'], ['ob', 'Order blocks'], ['spent', 'Spent zones'], ['structure', 'BOS / CHoCH'],
+  ['zones', 'Trade zones'], ['sd', 'Supply / demand'], ['sr', 'Support / resistance'], ['fvg', 'FVG'], ['ob', 'Order blocks'], ['spent', 'Spent zones'], ['structure', 'BOS / CHoCH'],
   ['liquidity', 'Liquidity'], ['swings', 'Swings'], ['levels', 'PDH/PDL · Asia'],
 ]
 const GRADE_RANK: Record<string, number> = { A: 0, B: 1, C: 2, D: 3, F: 4 }
@@ -20,7 +20,7 @@ export default function ChartPage({ theme }: { theme: string }) {
   const [selZone, setSelZone] = useState<TradeZone | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [loading, setLoading] = useState(false)
-  const [layers, setLayers] = useState<Layers>({ zones: true, fvg: true, ob: true, spent: false, structure: true, liquidity: true, swings: false, levels: true })
+  const [layers, setLayers] = useState<Layers>({ zones: true, fvg: true, ob: true, spent: false, structure: true, liquidity: true, swings: false, levels: true, sd: true, sr: true })
   // replay: `cursor` is the last visible global bar index
   const [replay, setReplay] = useState(false)
   const [cursor, setCursor] = useState<number | null>(null)
@@ -72,7 +72,7 @@ export default function ChartPage({ theme }: { theme: string }) {
       setSelZone(null)
       setSetupRef(focus.setup ?? null); setSetupView(null)
       // declutter so the setup stands out (layers can be switched back on in the toolbar)
-      if (focus.setup) setLayers(l => ({ ...l, zones: false, liquidity: false, spent: false }))
+      if (focus.setup) setLayers(l => ({ ...l, zones: false, liquidity: false, spent: false, sd: false, sr: false }))
       if (focus.replay) { setReplay(true); setCursor(index); setPlaying(false) }
       else { setReplay(false); setCursor(null) }
       clearFocus()

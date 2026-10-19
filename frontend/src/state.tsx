@@ -1,7 +1,7 @@
 import { createContext, useContext, useEffect, useState, type ReactNode } from 'react'
 import { api, type Meta, type SetupRef } from './api'
 
-export type Page = 'chart' | 'research' | 'patterns' | 'scanner' | 'data'
+export type Page = 'chart' | 'research' | 'patterns' | 'scanner' | 'portfolio' | 'data'
 
 /** A request to open the chart at a moment in history (optionally in replay). */
 export interface ChartFocus { symbol: string; tf: string; time: number; replay: boolean; label?: string; direction?: string; setup?: SetupRef }

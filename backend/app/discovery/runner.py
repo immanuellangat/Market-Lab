@@ -82,7 +82,7 @@ def _do_run(rid: int, tasks: list[tuple], p: dict) -> None:
             disc = Discovery(s, tf, d, p["target_r"], p["stop_atr"], p["cooldown"], p["min_n"],
                              log=lambda m: (_log(m), store.update_run(rid, message=m)))
             pats = disc.run()
-            store.replace_patterns(rid, s, tf, d, p["target_r"], pats)
+            store.replace_patterns(rid, s, tf, d, p["target_r"], pats, p["stop_atr"])
             summary["tested"] += disc.n_tested
             for x in pats:
                 summary[x["status"]] += 1

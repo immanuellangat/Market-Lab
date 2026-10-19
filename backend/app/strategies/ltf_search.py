@@ -27,7 +27,7 @@ import time
 import numpy as np
 import pandas as pd
 
-from ..config import DEFAULT_HORIZON, HTF_CONTEXT, SYMBOLS
+from ..config import DEFAULT_HORIZON, HTF_CONTEXT, SYMBOLS, TIMEFRAMES
 from ..data.store import bars_path
 from ..discovery.search import FDR_Q, _bh
 from ..execution.levels import levels_for_entry, signal_spec
@@ -139,6 +139,7 @@ def collect(progress=None, markets=None, setups=None, exits=None) -> pd.DataFram
         atr = df["atr"].to_numpy(float)
         spread = spread_price(df, point_size(symbol))
         times = df["time"].dt.tz_convert(None).to_numpy().astype("datetime64[s]").astype("int64")
+        tf_s = TIMEFRAMES[tf] * 60
         masks = setup_masks(df)
         for (setup, d), m in masks.items():
             if setups and setup not in setups:
@@ -161,8 +162,10 @@ def collect(progress=None, markets=None, setups=None, exits=None) -> pd.DataFram
                     if not np.isfinite(r):
                         continue
                     rows.append((symbol, tf, setup, d, ex, int(times[i]), float(r), float(r + spread[i] / abs(entry - stop)),
-                                 why, bool(i >= sp), *(bool(ff[f][i]) for f in FILTERS)))
-    cols = ["symbol", "tf", "setup", "direction", "exit", "time", "r", "gross", "why", "oos", *FILTERS]
+                                 why, int(times[i + 1]), int(times[i + held]) + tf_s, bool(i >= sp),
+                                 float(entry), float(stop), float(tgt), *(bool(ff[f][i]) for f in FILTERS)))
+    cols = ["symbol", "tf", "setup", "direction", "exit", "time", "r", "gross", "why", "entry_time", "exit_time", "oos",
+            "entry", "stop", "target", *FILTERS]
     return pd.DataFrame(rows, columns=cols).sort_values("time", kind="stable").reset_index(drop=True)
 
 

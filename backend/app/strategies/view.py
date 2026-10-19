@@ -41,7 +41,8 @@ def crt_view(w: dict) -> dict:
     flags = strat.setup_filters(eng, f)
     trades = [t for t in eng.trades(r["mode"], target_mode=r["target"])
               if strat._passes(flags[(t["i"], t["direction"])], r["filters"]) and "r" in t]
-    occ = [{"i": t["i"], "time": int(eng.ht[t["i"]]), "r": t["r"], "outcome": t["exit"], "oos": False, "direction": t["direction"]}
+    occ = [{"i": t["i"], "time": int(eng.ht[t["i"]]), "r": t["r"], "outcome": t["exit"], "oos": False, "direction": t["direction"],
+            "entry": t["entry"], "stop": t["stop"], "target": t["target"], "entry_time": t["entry_time"], "exit_time": t["exit_time"]}
            for t in trades]
     i = len(eng.ht) - 1
     hi, lo, atr = float(eng.hh[i]), float(eng.hl[i]), float(eng.hatr[i])
@@ -98,7 +99,9 @@ def smc_view(w: dict) -> dict:
     df, rec = get_features(w["symbol"], r["tf"])
     i = len(df) - 1
     tr = collect_one(w["symbol"], r["tf"], r)
-    occ = [{"i": -1, "time": int(t.time), "r": float(t.r), "outcome": t.why, "oos": bool(t.oos), "direction": t.direction}
+    occ = [{"i": -1, "time": int(t.time), "r": float(t.r), "outcome": t.why, "oos": bool(t.oos), "direction": t.direction,
+            "entry": float(t.entry), "stop": float(t.stop), "target": float(t.target),
+            "entry_time": int(t.entry_time), "exit_time": int(t.exit_time)}
            for t in tr.itertuples()]
     d1 = int(df["d1_ms_trend"].iloc[i])
     direction = "long" if d1 == 1 else "short" if d1 == -1 else "both"

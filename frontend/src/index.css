@@ -190,3 +190,6 @@ table.t td.r, table.t th.r { text-align: right; }
 
 .zone-tip { position: absolute; z-index: 5; pointer-events: none; max-width: 360px; background: var(--panel); border: 1px solid var(--border);
   border-radius: 8px; padding: 8px 10px; font-size: 12px; line-height: 1.5; box-shadow: 0 8px 24px rgba(0, 0, 0, 0.35); }
+
+/* portfolio stat tiles */
+.stat-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); gap: 12px; }

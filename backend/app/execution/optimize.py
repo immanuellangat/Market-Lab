@@ -101,7 +101,7 @@ class ExecutionLab:
             tr = {"i": int(i), "oos": bool(i >= self.sp), "taken": False}
             if entry_mode == "next":
                 entry = self.o[i + 1]
-                stop = {"atr1": entry - sg * a, "atr1.5": entry - sg * 1.5 * a}.get(stop_mode) or self._struct_stop(i, entry)
+                stop = entry - sg * Plan("next", stop_mode).stop_atr * a if stop_mode.startswith("atr") else self._struct_stop(i, entry)
                 tr.update(taken=True, entry=entry, stop=stop, atr=a, cost=self.spread[i],
                           path=(self.h[i + 1: i + 1 + self.H], self.l[i + 1: i + 1 + self.H], self.c[i + 1: i + 1 + self.H]))
             else:

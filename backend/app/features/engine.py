@@ -19,7 +19,7 @@ from collections import OrderedDict
 import pandas as pd
 
 from ..config import FEATURE_VERSION, FEATURES_DIR, HTF_CONTEXT, TIMEFRAMES
-from ..data.store import bars_path, load_bars
+from ..data.store import atomic_write, bars_path, load_bars
 from .indicators import add_indicators
 from .sessions import add_sessions
 from .structure import Records, add_structure
@@ -90,9 +90,12 @@ def _remember(key, mtime, df, rec):
 def _build_and_store(symbol: str, tf: str, mtime: float) -> tuple[pd.DataFrame, Records]:
     df, rec = _compute(symbol, tf)
     fp, rp = _paths(symbol, tf)
-    df.to_parquet(fp, index=False)
-    with open(rp, "wb") as f:
-        pickle.dump({"mtime": mtime, "rec": rec}, f)
+    # temp file + swap: a concurrent reader never sees a half-written cache
+    atomic_write(fp, lambda p: df.to_parquet(p, index=False))
+    def write_rec(p):
+        with open(p, "wb") as f:
+            pickle.dump({"mtime": mtime, "rec": rec}, f)
+    atomic_write(rp, write_rec)
     _remember((symbol, tf), mtime, df, rec)
     return df, rec
 
@@ -131,10 +134,13 @@ def get_features(symbol: str, tf: str, wait: bool = False) -> tuple[pd.DataFrame
 
     fp, rp = _paths(symbol, tf)
     if fp.exists() and rp.exists():
-        with open(rp, "rb") as f:
-            saved = pickle.load(f)
-        if saved["mtime"] == mtime or not wait:
-            df = pd.read_parquet(fp)
+        try:
+            with open(rp, "rb") as f:
+                saved = pickle.load(f)
+            df = pd.read_parquet(fp) if saved["mtime"] == mtime or not wait else None
+        except Exception:   # damaged cache (e.g. an interrupted write): rebuild it
+            df = saved = None
+        if df is not None:
             _remember(key, saved["mtime"], df, saved["rec"])
             if saved["mtime"] != mtime:
                 _refresh_async(symbol, tf, mtime)

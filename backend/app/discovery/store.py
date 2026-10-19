@@ -71,12 +71,17 @@ def list_runs(limit: int = 30) -> list[dict]:
     return out
 
 
-def replace_patterns(run_id: int, symbol: str, tf: str, direction: str, target_r: float, pats: list[dict]) -> None:
-    """A new search for the same market/direction/target supersedes the previous results."""
+def replace_patterns(run_id: int, symbol: str, tf: str, direction: str, target_r: float, pats: list[dict],
+                     stop_atr: float | None = None) -> None:
+    """A new search for the same market/direction/exit (target and stop) supersedes the previous results."""
     now = int(time.time())
     with _lock:
-        _conn.execute("DELETE FROM patterns WHERE symbol=? AND tf=? AND direction=? AND target_r=?",
-                      (symbol, tf, direction, target_r))
+        if stop_atr is None:
+            _conn.execute("DELETE FROM patterns WHERE symbol=? AND tf=? AND direction=? AND target_r=?",
+                          (symbol, tf, direction, target_r))
+        else:
+            _conn.execute("DELETE FROM patterns WHERE symbol=? AND tf=? AND direction=? AND target_r=? AND stop_atr=?",
+                          (symbol, tf, direction, target_r, stop_atr))
         for p in pats:
             a, o = p["all"], p["oos"]
             _conn.execute(

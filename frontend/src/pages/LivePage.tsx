@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react'
-import { live, type LiveStatus, type Signal, type TelegramCfg, type Watch } from '../api'
+import { live, type ExitOption, type ExitProfiles, type LiveStatus, type Signal, type TelegramCfg, type Watch } from '../api'
 import { notifyPermission, requestNotify } from '../alerts'
 import RiskCalc from '../RiskCalc'
 import { fmt, useApp } from '../state'
@@ -185,8 +185,87 @@ function SignalCard({ s }: { s: Signal }) {
   )
 }
 
+/** The exit a watch trades with, and how that exit did in the past and on unseen data. */
+function ExitLine({ w }: { w: Watch }) {
+  const st = w.stats?.stats
+  const i = st?.in_sample, o = st?.out_of_sample
+  return (
+    <div className="small" style={{ lineHeight: 1.5 }}>
+      <span className="muted">Exit:</span> <b>stop {w.stop_atr}×ATR · target {w.target_r}R</b>
+      {i?.n ? (
+        <div className="num">
+          <span className="muted">Past</span> wins {fmt.pct(i.win_rate, 0)} · {fmt.r(i.avg_r)}
+          {o?.n ? <> <span className="muted">· Unseen</span> wins {fmt.pct(o.win_rate, 0)} · {fmt.r(o.avg_r)}</> : null}
+          <span className="faint"> per trade</span>
+        </div>
+      ) : null}
+    </div>
+  )
+}
+
+const exitName = (x: ExitOption) => `stop ${x.stop_atr}×ATR · target ${x.target_r}R`
+
+/** Pick a watch's exit: the two suggested profiles first, every live exit on request. */
+function ExitChooser({ w, act, busy }: { w: Watch; busy: string | null; act: (l: string, f: () => Promise<unknown>) => void }) {
+  const [p, setP] = useState<ExitProfiles | null>(null)
+  const [err, setErr] = useState<string | null>(null)
+  const [all, setAll] = useState(false)
+  useEffect(() => { live.exits(w.id).then(setP).catch(e => setErr((e as Error).message)) }, [w.id])
+  const inUse = (x: ExitOption) => x.stop_atr === w.stop_atr && x.target_r === w.target_r && (!w.plan || w.plan === x.plan)
+  const use = (x: ExitOption) => act(`x${w.id}`, () => live.setExit(w.id, x.stop_atr, x.target_r))
+  const UseBtn = ({ x }: { x: ExitOption }) => inUse(x)
+    ? <span className="chip accent">in use</span>
+    : <button className="btn sm primary" disabled={!!busy} onClick={() => use(x)}>{busy === `x${w.id}` && <span className="spinner" />} Use</button>
+  const Profile = ({ title, hint, x }: { title: string; hint: string; x: ExitOption | null }) => (
+    <div style={{ border: '1px solid var(--border)', borderRadius: 8, padding: '7px 9px' }}>
+      <div className="row"><b style={{ fontSize: 12.5 }}>{title}</b><span className="grow" />{x && <UseBtn x={x} />}</div>
+      {x ? (
+        <div className="small num" style={{ lineHeight: 1.5 }}>
+          <div>{exitName(x)}</div>
+          <div>wins <b>{fmt.pct(x.is.win_rate, 0)}</b> <span className="muted">(unseen {fmt.pct(x.oos.win_rate, 0)})</span> · <b className={(x.is.avg_r ?? 0) >= 0 ? 'pos' : 'neg'}>{fmt.r(x.is.avg_r)}</b> <span className="muted">(unseen {fmt.r(x.oos.avg_r)})</span> per trade</div>
+        </div>
+      ) : <div className="small muted">{hint}</div>}
+    </div>
+  )
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 6, borderTop: '1px solid var(--border)', paddingTop: 8 }}>
+      {err && <div className="small error">{err}</div>}
+      {!p && !err && <div className="small muted row"><span className="spinner" /> Testing 12 exits on this setup's history…</div>}
+      {p && (
+        <>
+          <Profile title="Higher win rate" x={p.high_wr} hint="No exit wins often enough here while staying profitable." />
+          <Profile title="Most profit per trade" x={p.best_r} hint="Not enough past trades to choose." />
+          <button className="btn sm ghost" style={{ alignSelf: 'flex-start' }} onClick={() => setAll(!all)}>{all ? 'Hide' : 'Show'} all {p.exits.length} exits</button>
+          {all && (
+            <div style={{ overflowX: 'auto' }}>
+              <table className="t num" style={{ fontSize: 11 }}>
+                <thead><tr><th>Exit</th><th className="r" title="past / unseen">Wins</th><th className="r" title="past / unseen">R per trade</th><th /></tr></thead>
+                <tbody>
+                  {p.exits.map(x => (
+                    <tr key={x.plan}>
+                      <td style={{ whiteSpace: 'nowrap' }}>{x.stop_atr}×ATR·{x.target_r}R</td>
+                      <td className="r" style={{ whiteSpace: 'nowrap' }}>{fmt.pct(x.is.win_rate, 0)}<span className="muted">/{fmt.pct(x.oos.win_rate, 0)}</span></td>
+                      <td className="r" style={{ whiteSpace: 'nowrap' }}>
+                        <span className={(x.is.avg_r ?? 0) >= 0 ? 'pos' : 'neg'}>{fmt.num(x.is.avg_r, 2)}</span><span className="muted">/{fmt.num(x.oos.avg_r, 2)}</span>
+                      </td>
+                      <td className="r">{inUse(x) ? <span className="faint">✓</span> : <button className="btn sm ghost" style={{ padding: '1px 4px' }} disabled={!!busy} onClick={() => use(x)}>Use</button>}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+              <div className="small faint">Each cell: past / unseen.</div>
+            </div>
+          )}
+          <div className="small faint" style={{ lineHeight: 1.45 }}>{p.rule} Open trades keep the stop and target they were sent with.</div>
+        </>
+      )}
+    </div>
+  )
+}
+
 function WatchlistPanel({ watches, busy, act }: { watches: Watch[]; busy: string | null; act: (l: string, f: () => Promise<unknown>) => void }) {
   const { openChartAt } = useApp()
+  const [choosing, setChoosing] = useState<number | null>(null)
   return (
     <div className="panel">
       <div className="panel-head"><h3>Watched setups</h3><span className="small faint">{watches.filter(w => w.active).length} active</span></div>
@@ -208,7 +287,9 @@ function WatchlistPanel({ watches, busy, act }: { watches: Watch[]; busy: string
               {w.stats?.decay && (w.stats.decay.status === 'weakening' || w.stats.decay.status === 'broken') && (
                 <div className="small neg">⚠ edge {w.stats.decay.status}</div>
               )}
+              {!w.conditions[0]?.startsWith('strategy:') && <ExitLine w={w} />}
               {rec && <div className="small num">Live: {rec.signals} signals · {rec.wins}W / {rec.losses}L · {rec.open} open{rec.avg_r !== null ? ` · ${fmt.r(rec.avg_r)} avg` : ''}</div>}
+              {choosing === w.id && <ExitChooser w={w} act={act} busy={busy} />}
               <div className="row">
                 {w.conditions[0]?.startsWith('strategy:') ? (
                   <button className="btn sm" title="Show where this strategy stands now, its possible entry zone and its past trades"
@@ -218,6 +299,10 @@ function WatchlistPanel({ watches, busy, act }: { watches: Watch[]; busy: string
                   <button className="btn sm" title="Show this setup on the chart: which conditions hold now and every past occurrence"
                     onClick={() => openChartAt({ symbol: w.symbol, tf: w.tf, time: Math.floor(Date.now() / 1000), replay: false,
                       setup: { conditions: w.conditions, direction: w.direction as 'long' | 'short', name: w.name, target_r: w.target_r, stop_atr: w.stop_atr, cooldown: w.cooldown } })}>View on chart</button>
+                )}
+                {!w.conditions[0]?.startsWith('strategy:') && (
+                  <button className={`btn sm ${choosing === w.id ? 'on' : ''}`} title="Choose how this setup's trades are closed: higher win rate or more profit per trade"
+                    onClick={() => setChoosing(choosing === w.id ? null : w.id)}>Change exit</button>
                 )}
                 <button className="btn sm" onClick={() => act(`t${w.id}`, () => live.patchWatch(w.id, { active: !w.active }))}>{w.active ? 'Pause' : 'Resume'}</button>
                 <button className="btn sm" disabled={!!busy} onClick={() => act(`r${w.id}`, () => live.refreshWatch(w.id))}>{busy === `r${w.id}` && <span className="spinner" />} Refresh stats</button>

@@ -5,6 +5,7 @@ import DataPage from './pages/DataPage'
 import LivePage from './pages/LivePage'
 import ResearchPage from './pages/ResearchPage'
 import PatternsPage from './pages/PatternsPage'
+import PortfolioPage from './pages/PortfolioPage'
 import { AppProvider, fmt, useApp, type Page } from './state'
 
 const ICONS: Record<Page, string> = {
@@ -12,6 +13,7 @@ const ICONS: Record<Page, string> = {
   research: 'M9 3h6M10 3v6l-5 9a2 2 0 0 0 1.7 3h10.6a2 2 0 0 0 1.7-3l-5-9V3',
   patterns: 'M4 4h6v6H4zM14 4h6v6h-6zM4 14h6v6H4zM14 14h6v6h-6z',
   scanner: 'M12 12m-8 0a8 8 0 1 0 16 0a8 8 0 1 0-16 0M12 12l5-5M12 4v2',
+  portfolio: 'M3 17l6-6 4 4 8-8M15 7h6v6',
   data: 'M4 6c0-1.7 3.6-3 8-3s8 1.3 8 3-3.6 3-8 3-8-1.3-8-3zM4 6v12c0 1.7 3.6 3 8 3s8-1.3 8-3V6M4 12c0 1.7 3.6 3 8 3s8-1.3 8-3',
 }
 const NAV: { id: Page; label: string; tag?: string }[] = [
@@ -19,6 +21,7 @@ const NAV: { id: Page; label: string; tag?: string }[] = [
   { id: 'research', label: 'Research lab' },
   { id: 'scanner', label: 'Live signals' },
   { id: 'patterns', label: 'Discovered patterns' },
+  { id: 'portfolio', label: 'Portfolio' },
   { id: 'data', label: 'Data' },
 ]
 
@@ -55,6 +58,7 @@ function Shell() {
         {page === 'research' && <ResearchPage theme={theme} />}
         {page === 'scanner' && <LivePage />}
         {page === 'patterns' && <PatternsPage theme={theme} />}
+        {page === 'portfolio' && <PortfolioPage theme={theme} />}
         {page === 'data' && <DataPage />}
       </main>
       <div className="toasts">

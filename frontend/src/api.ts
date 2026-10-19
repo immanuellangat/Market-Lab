@@ -22,7 +22,13 @@ export interface Zone { kind: string; start: number; formed: number; end: number
 export interface Swing { i: number; conf: number; price: number; kind: string; side: 'high' | 'low' }
 export interface StructEvent { i: number; kind: string; level: number; ref_i: number }
 export interface Pool { kind: 'eqh' | 'eql'; start: number; end: number | null; level: number }
-export interface Overlays { zones: Zone[]; swings: Swing[]; events: StructEvent[]; pools: Pool[] }
+/** supply / demand: base before an impulsive move (pattern RBR/DBR/DBD/RBD or plain 'base') */
+export interface SdZone { kind: 'supply' | 'demand'; pattern: string; start: number; formed: number; end: number | null; top: number; bottom: number; touches: number; status: 'fresh' | 'tested' | 'broken' }
+/** support / resistance: cluster of swing highs/lows, ranked by chance of being reached; flip = holds both (changed role) */
+export interface SrZone { kind: 'support' | 'resistance'; top: number; bottom: number; start: number; last: number; touches: number; flip: boolean; distance_atr: number
+  /** share of past windows of `horizon` bars in which price travelled this far (1 = price is inside) */
+  inside: boolean; p_reach: number; horizon: number; sample: number }
+export interface Overlays { zones: Zone[]; swings: Swing[]; events: StructEvent[]; pools: Pool[]; sd_zones: SdZone[]; sr_zones: SrZone[] }
 
 export interface Level { price: number; kind: string; rr?: number }
 export interface QuickStats {
@@ -119,7 +125,9 @@ export interface SetupView {
   checklist: { id: string; label: string; met: boolean; bias: Bias; level: number | null; level_label: string | null
     zone: { top: number; bottom: number; start_time: number; label: string } | null }[]
   met: number; total: number
-  occurrences: { i: number; time: number; r: number; outcome: string; oos: boolean; direction?: 'long' | 'short' }[]
+  occurrences: { i: number; time: number; r: number; outcome: string; oos: boolean; direction?: 'long' | 'short'
+    /** the trade as a position (entry candle to exit candle) */
+    entry?: number; stop?: number; target?: number; entry_time?: number; exit_time?: number }[]
   stats: Summary; evidence: Evidence
   entry_zone: { available: false; reason: string } | {
     available: true; top: number; bottom: number; mid: number; stop: number; target: number
@@ -133,6 +141,9 @@ export interface WatchStats {
   stats: { all: Summary; in_sample: Summary; out_of_sample: Summary }
   evidence: Evidence; decay: Decay | null; split_time: number; as_of: number
 }
+export interface ExitStats { n: number; win_rate: number | null; avg_r: number | null }
+export interface ExitOption { stop_atr: number; target_r: number; plan: string; description: string; is: ExitStats; oos: ExitStats; grade: string }
+export interface ExitProfiles { exits: ExitOption[]; high_wr: ExitOption | null; best_r: ExitOption | null; current: ExitOption | null; rule: string }
 export interface Watch {
   id: number; created: number; name: string; symbol: string; tf: string; direction: 'long' | 'short' | 'both'
   conditions: string[]; target_r: number; stop_atr: number; cooldown: number; active: number; plan?: string | null
@@ -177,6 +188,8 @@ export const live = {
   watchlist: () => req<Watch[]>('/api/live/watchlist'),
   addWatch: (w: WatchRequest) => post<Watch>('/api/live/watchlist', w),
   patchWatch: (id: number, p: { active?: boolean; name?: string }) => send<Watch>('PATCH', `/api/live/watchlist/${id}`, p),
+  exits: (id: number) => req<ExitProfiles>(`/api/live/watchlist/${id}/exits`),
+  setExit: (id: number, stop_atr: number, target_r: number) => post<Watch>(`/api/live/watchlist/${id}/exit`, { stop_atr, target_r }),
   refreshWatch: (id: number) => post<Watch>(`/api/live/watchlist/${id}/refresh`, {}),
   deleteWatch: (id: number) => send<{ deleted: number }>('DELETE', `/api/live/watchlist/${id}`),
   signals: (since_id = 0, limit = 200) => req<Signal[]>(`/api/live/signals?${qs({ since_id, limit })}`),
@@ -241,7 +254,29 @@ export interface OptimizeResult {
 export interface StudyPlan { key: string; description: string; setups: number; mean_d_oos: number; median_d_oos: number; share_improved: number; mean_d_is: number; mean_d_winrate: number; robust: boolean }
 export interface StudyResult { finished: number; setups: number; plans: StudyPlan[]; components: Record<string, Record<string, number>>; robust: StudyPlan[]; rule: string }
 
+export interface PortfolioSettings {
+  balance: number; risk_pct: number; max_open: number; max_open_risk: number; one_per_symbol: boolean
+  max_dd_tolerance: number; period: 'all' | 'unseen'
+}
+export interface PortfolioResult {
+  config: PortfolioSettings; computed: number
+  setups: { id: number; name: string; symbol: string; tf: string; direction: string; plan: string; trades: number; error?: string }[]
+  account: {
+    start: number; end: number; years: number; final_equity: number; total_return: number; cagr: number; max_dd: number
+    longest_dd_days: number; trades: number; skipped: Record<string, number>; win_rate: number | null; avg_r: number | null
+    worst_losing_streak: number; trades_per_month: number; profitable_months: number | null
+    yearly: { year: number; return: number }[]; monthly: { month: string; return: number }[]
+    per_setup: { setup: number; trades: number; r: number; wins: number; pnl: number; avg_r: number | null }[]
+    curve: { time: number; value: number }[]
+  }
+  monte_carlo: { note: string } | { runs: number; trades_per_run: number; suggested_risk_pct: number | null; note?: undefined
+    table: { risk_pct: number; median_return: number; p5_return: number; median_dd: number; p95_dd: number; p_dd_over_limit: number; p_loss: number }[] }
+  overlap: { a: number; b: number; overlap_share: number; weekly_corr: number | null }[]
+}
+
 export const execution = {
+  portfolio: () => req<{ settings: PortfolioSettings; result: PortfolioResult | null }>('/api/execution/portfolio'),
+  runPortfolio: (s: PortfolioSettings) => post<PortfolioResult>('/api/execution/portfolio', s),
   optimize: (b: { symbol: string; tf: string; conditions: string[]; direction: string; cooldown: number }) => post<OptimizeResult>('/api/execution/optimize', b),
   startStudy: () => post<{ started: boolean }>('/api/execution/study', {}),
   study: () => req<{ state: { running: boolean; progress: number; total: number; message: string }; result: StudyResult | null }>('/api/execution/study'),

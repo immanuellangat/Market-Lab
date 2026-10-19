@@ -280,8 +280,7 @@ class LiveService:
         atr = float(row["atr"])
         entry = float(row["close"])  # the trade is taken at the next candle's open, ~this price
         sgn = 1 if w["direction"] == "long" else -1
-        plan = Plan.from_key(w.get("plan") or Plan("next", "atr1" if w["stop_atr"] == 1 else "atr1.5" if w["stop_atr"] == 1.5 else "atr1",
-                                                    f"r{w['target_r']:g}", "none").key)
+        plan = Plan.from_key(w.get("plan") or Plan("next", f"atr{w['stop_atr']:g}", f"r{w['target_r']:g}", "none").key)
         spec = signal_spec(plan, df, last, w["direction"])
         stop, target = levels_for_entry(spec, entry)
         risk = abs(entry - stop)

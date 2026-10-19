@@ -136,6 +136,10 @@ def add_watch(req: WatchReq):
         if pl.entry != "next":
             raise HTTPException(400, "Lower-timeframe entry plans are research-only: they did not beat simple entries in testing.")
     w = req.model_dump()
+    from ..execution.winrate import plan_exit
+    ex = plan_exit(req.plan)
+    if ex:  # the statistics must describe the exit that is actually traded
+        w["stop_atr"], w["target_r"] = ex
     w["name"] = req.name or " + ".join(label_of(c) for c in req.conditions)
     try:
         w["stats"] = snapshot_stats(w)
@@ -174,6 +178,43 @@ def refresh_watch(wid: int):
     if not w:
         raise HTTPException(404, "Not found")
     db.update_watch(wid, stats=snapshot_stats(w), stats_updated=int(time.time()))
+    return _clean(db.get_watch(wid))
+
+
+@router.get("/watchlist/{wid}/exits")
+def watch_exits(wid: int):
+    """Every live exit for this watch with its past and unseen results, and the two suggested profiles."""
+    from ..execution.winrate import exit_profiles
+    from ..strategies.live import is_strategy
+    w = db.get_watch(wid)
+    if not w:
+        raise HTTPException(404, "Not found")
+    if is_strategy(w):
+        raise HTTPException(400, "Strategy watches use their own fixed exit rules.")
+    return _clean(exit_profiles(w))
+
+
+class ExitReq(BaseModel):
+    stop_atr: float
+    target_r: float
+
+
+@router.post("/watchlist/{wid}/exit")
+def set_exit(wid: int, req: ExitReq):
+    """Switch a watch to another live exit; its statistics are recomputed for that exit."""
+    import time
+    from ..execution.winrate import LIVE_STOPS, exit_plan
+    from ..strategies.live import is_strategy
+    w = db.get_watch(wid)
+    if not w:
+        raise HTTPException(404, "Not found")
+    if is_strategy(w):
+        raise HTTPException(400, "Strategy watches use their own fixed exit rules.")
+    if req.stop_atr not in LIVE_STOPS or req.target_r not in TARGETS_R:
+        raise HTTPException(400, f"Stop must be one of {LIVE_STOPS} x ATR and target one of {TARGETS_R} R.")
+    w.update(stop_atr=req.stop_atr, target_r=req.target_r, plan=exit_plan(req.stop_atr, req.target_r))
+    db.update_watch(wid, stop_atr=w["stop_atr"], target_r=w["target_r"], plan=w["plan"],
+                    stats=snapshot_stats(w), stats_updated=int(time.time()))
     return _clean(db.get_watch(wid))
 
 

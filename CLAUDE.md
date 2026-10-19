@@ -20,17 +20,45 @@ Local price-action research platform (see README.md for features and layout).
 ## Working principles the user has accepted
 - Honest statistics: in-sample vs out-of-sample split (last 30% unseen), purged split, costs included,
   stop-before-target on the same candle, BH multiple-testing correction in discovery. Grades = strength of evidence, not win probability.
-- Win rate is not the goal; expectancy per trade on unseen data is.
+- Win rate is not the goal; expectancy per trade on unseen data is. Since 2026-10-18 the user explicitly wants a
+  HIGHER WIN RATE too: raise it (via exits) only where unseen expectancy stays clearly positive, and say what it costs.
 - Findings so far: lower-timeframe confirmation entries hurt; partials raise win rate but cut expectancy;
   robust exit improvements (pooled study over 228 standard setups): 1.5×ATR stop + trailing / 3R target (+~0.04R).
+- WIN-RATE STUDY 2026-10-18 (`execution/winrate.py`, setting `winrate_study`; plans now accept any "atrK" stop / "rK" target):
+  win rate is set mostly by the exit. Pooled 232 no-edge setups: 2R target 33% WR -> 0.5R target 66% WR, expectancy
+  still <= 0 (high WR on a setup without edge is an illusion). Wider stops (2-3 ATR) cut cost drag in every pool.
+  Extra confluence filters: 167 tests on the live watches, 0 raised win rate significantly (BH). #16 high-WR exit fails OOS.
+  APPLIED 2026-10-18 (user approved): live exits are restricted to ATR stop {1,1.5,2,3} x target {1,2,3}R, no
+  management, because stats/chart/similar-matches/live levels all represent exactly that (`winrate.LIVE_STOPS`,
+  `exit_plan`/`plan_exit`; a watch's stop_atr/target_r fields now always match its plan, also on add).
+  Same rule (best IS R with IS WR >= 55%, IS R >= +0.10) on that set: #6 & #8 -> 2ATR/1R, #7 -> 3ATR/1R.
+  App win rate = target reached (stricter than "closed in profit"). Portfolio (live set, 1% risk): won 42% -> 55%
+  (all) / 45% -> 56% (unseen); max DD 20.5% -> 10.2% (all), unseen ~9% both; R/trade unseen +0.38 -> +0.26;
+  CAGR unseen 52% -> 34% at 1% risk, but 20%-DD-safe risk rises 1% -> 1.5% and median MC return is then equal.
+  UI: Live page watch cards show the exit + past/unseen stats; "Change exit" chooser (`GET .../watchlist/{id}/exits`,
+  `POST .../watchlist/{id}/exit`) with profiles "Higher win rate" / "Most profit per trade" + all 12 exits.
+- HIGH-WIN-RATE DISCOVERY 2026-10-18: run #4 (2xATR stop, 1R target, 6 markets x H1/H4 x both directions):
+  960 candidates -> 9 validated (all-history WR 57-75%, unseen +0.30..+0.51R; grades A x3, B x5, F x1), 383 promising.
+  Pattern ids 2519 2563 2633 2779 2910 2963 3000 3102 3300. The 3 grade-A ones were added live (user approved) as
+  watches #21-#23, named "(forward test)"; see Watchlist. Grade-B ones (2519 2633 2963 3000 3102) not added.
+  `store.replace_patterns` now keys on target AND stop, so runs with different exits coexist (old 2R/1ATR library intact).
+- Data files (bars, feature caches, meta.json) are written atomically (`store.atomic_write`): the live server used to
+  overwrite bar files in place, which corrupted caches read at the same moment.
 
 ## Watchlist (live)
-#1 EURUSD H1 long sweep+FVG retest (baseline exit) · #6 BTCUSD H1 long (1.5ATR/3R) · #7 XAUUSD H4 long (1.5ATR/3R) · #8 USDJPY H1 short (baseline).
+2026-10-17: #1 and #9–#12 had been deleted (signals table also emptied); restored from their original definitions
+as #16 (= old #1, paused) and #17/#18 (= #9/#10), #19/#20 (= #11/#12). IDs below are the ORIGINAL numbers.
+2026-10-18: duplicates #13/#14 (copies of #6) and #15 (copy of #7) removed (no signals). Exits switched to high win rate:
+#1 EURUSD H1 long sweep_low_recent + fvg_bull_retest (1ATR/2R, paused) · #6 BTCUSD H1 long (2ATR/1R) · #7 XAUUSD H4 long (3ATR/1R) · #8 USDJPY H1 short (2ATR/1R).
 #9 EURUSD H4 + #10 US100 H4: CRT "close|full" + d1_bias + pd_zone + big_range, both directions — FORWARD TEST, flagged
 "unproven" (grade C per market; chosen after seeing OOS, so not validated). Strategy watches: conditions=["strategy:crt"],
 plan="crt|H4|close|full|<filters>", handled by `strategies/live.py` + `LiveService._scan_strategy` (fixed stop/target levels).
 #11 EURUSD H1 + #12 XAUUSD H1: SMC "smc|H1|smc_any|r2|bias2,htf_pd,killzone" (sweep -> CHoCH/MSS -> FVG/OB retest,
 D1 structure agrees, H4 discount/premium, killzone; struct stop, 2R) — FORWARD TEST, "unproven" (pooled OOS +0.08R, q=1).
+#21 BTCUSD H1 long (pattern 2563) · #22 EURUSD H1 short (2779) · #23 GBPUSD H1 long (2910): high-win-rate discovery
+(2ATR/1R), grade A, unseen wins 67/68/76%, +0.39/+0.40/+0.50R — added 2026-10-18 as forward tests (in the name).
+Portfolio with #21-#23 (1% risk, unseen): 13 trades/month, won 60%, +0.29R/trade, CAGR 56%, max DD 9%; low overlap
+with the other watches (10-20% time together, weekly corr ~0). Without the CRT/SMC tests: unseen won 66%, DD 7%.
 
 ## Open tasks
 1. **Lower-timeframe daily strategy signals (user request, in progress — nothing built yet).**
@@ -56,9 +84,26 @@ D1 structure agrees, H4 discount/premium, killzone; struct stop, 2R) — FORWARD
      for these concepts with this broker's spreads. Best = H1 SMC (live #11/#12). No PA rule held out-of-sample.
      User asked: SMC on H1 only. APA = plain price action.
    - Alchemist: rules unknown — ask the user to describe them; do NOT invent rules.
-2. Portfolio simulator (`backend/app/execution/portfolio.py`, `sizing.py`) — engine written, not wired to API/UI yet;
-   lot sizing on live signals not done. A corrupted feature-cache pickle broke one run: delete
-   `%LOCALAPPDATA%\MarketLab\data\features\*` entries that fail to load (they rebuild).
+2. DONE 2026-10-07: Portfolio page (sidebar "Portfolio", `pages/PortfolioPage.tsx`, `GET/POST /api/execution/portfolio`,
+   last result in setting `portfolio_last`). Includes CRT/SMC strategy watches (`portfolio._strategy_trades`).
+   Result (active watches, 1% risk): all history CAGR 42% / max DD 21%; unseen-only CAGR 51% / max DD 9%;
+   stress test suggests 0.75% risk for a 20% DD limit. Watchlist now also has #13/#14 (exact copies of #6, added by
+   the user, flagged duplicate) and #15 (copy of #7 with baseline exit); #1 EURUSD is paused by the user. Feature caches are now written atomically and a cache that
+   fails to load is rebuilt automatically (`features/engine.py`), after corrupt US100 caches broke two runs.
+   2026-10-17 re-run (watches restored): all history CAGR 39% / max DD 21%; unseen-only CAGR 51% / max DD 9%.
+2b. DONE 2026-10-19: chart labels for supply/demand + support/resistance zones (`features/sdsr.py`, returned by
+   `/api/overlays` as `sd_zones`/`sr_zones`, layers "Supply / demand" and "Support / resistance", hover tooltips).
+   S/D = 1-3 small-body base candles (body <= 0.5 ATR) then impulse (>= 0.8 ATR body, >= 1.5 ATR away within 3 bars),
+   named RBR/DBR/DBD/RBD; fresh/tested/broken as of the replay bar. S/R = clusters (0.5 ATR) of >= 2 confirmed swings
+   in the last 500 bars, top 4 per side by CHANCE OF BEING REACHED within DEFAULT_HORIZON bars (user request:
+   "most likely to be triggered"; empirical ATR-excursion table, last 20k bars as of the bar; calibrated: predicted
+   70-90% -> reached 78-79%, 90%+ -> 94-96%, 0-30% -> 13-15%), >= 1 ATR apart; touches only break ties; "flip" = both highs and lows. Drawing only —
+   NOT backtested yet (no conditions/grades for these zones).
+2c. DONE 2026-10-19: setups drawn as long/short POSITION boxes (TradingView position tool; user request):
+   green entry->target, red entry->stop. Past trades: entry candle -> exit candle (occurrences now carry entry/stop/
+   target/entry_time/exit_time: `routes._position` for patterns, CRT trade dict, SMC `collect` columns). Projected
+   setup (entry zone) and selected key trade zone: drawn after the last candle; chart rightOffset 40 while shown.
+   Checked: drawn exits match backtest win/loss on 782 trades.
 3. Optional: show recently filled zones (last ~50 candles) by default on the chart.
 4. DONE 2026-10-07: "View on chart" for watched setups (Live page) and discovered patterns (library row + pattern page).
    `/api/setup_view` -> checklist (met/not, price level where one exists via `_LEVEL_OF`/`_PD_FRACTION` in routes.py)
