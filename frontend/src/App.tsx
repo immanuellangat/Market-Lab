@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { signalTitle, useSignalAlerts } from './alerts'
+import { priceAlertTitle, signalTitle, usePriceAlertToasts, useSignalAlerts } from './alerts'
 import ChartPage from './pages/ChartPage'
 import DataPage from './pages/DataPage'
 import LivePage from './pages/LivePage'
@@ -31,6 +31,7 @@ const NAV: { id: Page; label: string; tag?: string }[] = [
 function Shell() {
   const { page, setPage, metaError } = useApp()
   const { toasts, dismiss } = useSignalAlerts()
+  const { paToasts, dismissPa } = usePriceAlertToasts()
   const [theme, setTheme] = useState(() => { try { return localStorage.getItem('theme') ?? 'dark' } catch { return 'dark' } })
   useEffect(() => {
     document.documentElement.dataset.theme = theme
@@ -66,6 +67,17 @@ function Shell() {
         {page === 'data' && <DataPage />}
       </main>
       <div className="toasts">
+        {paToasts.map(a => (
+          <div key={`pa${a.id}`} className="toast" onClick={() => { setPage('chart'); dismissPa(a.id) }}>
+            <div className="row">
+              <b className="grow">{priceAlertTitle(a)}</b>
+              <button className="btn sm ghost" aria-label="Dismiss" onClick={e => { e.stopPropagation(); dismissPa(a.id) }}>✕</button>
+            </div>
+            <div className="small num muted">
+              Price ≈ {fmt.price(a.trigger_price)} · zone {a.top === a.bottom ? fmt.price(a.top) : `${fmt.price(a.bottom)}–${fmt.price(a.top)}`}{a.tf ? ` · drawn on ${a.tf}` : ''}
+            </div>
+          </div>
+        ))}
         {toasts.map(s => (
           <div key={s.id} className={`toast ${s.direction}`} onClick={() => { setPage('scanner'); dismiss(s.id) }}>
             <div className="row">

@@ -28,7 +28,7 @@ from ..research.zones import _liquidity
 from ..execution.levels import levels_for_entry, signal_spec
 from ..execution.simulate import BASELINE, Plan, simulate
 from ..strategies import crt, live as strat
-from . import db, notify
+from . import db, notify, price_alerts
 
 TICK_SECONDS = 10
 CATCHUP_BARS = 24          # after downtime, candles since the last scan are checked too (at most this many)
@@ -118,6 +118,11 @@ class LiveService:
         self.last_tick = time.time()
         if not self._ensure_mt5():
             return
+        try:
+            for a in price_alerts.check(source):
+                self._log(f"{'LATE ' if a['late'] else ''}PRICE ALERT #{a['id']}: {a['symbol']} reached {a['label']}")
+        except Exception as e:
+            self._log(f"price alerts failed: {e}")
         now = time.time()
         updated: list[tuple[str, str]] = []
         for symbol in SYMBOLS:

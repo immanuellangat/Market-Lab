@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { api, live, type Bars, type Bias, type KeyZones, type Overlays, type QuickStats, type SetupRef, type SetupView, type TradeZone } from '../api'
-import PriceChart, { type Layers } from '../chart/PriceChart'
+import { api, live, type Bars, type Bias, type KeyZones, type Overlays, type PriceAlert, type QuickStats, type SetupRef, type SetupView, type TradeZone } from '../api'
+import PriceChart, { type Layers, type ZoneRef } from '../chart/PriceChart'
 import RiskCalc from '../RiskCalc'
 import { TZ_LABEL, fmt, useApp } from '../state'
 
@@ -36,6 +36,26 @@ export default function ChartPage({ theme }: { theme: string }) {
 
   const [zoneStats, setZoneStats] = useState<Record<string, QuickStats> | null>(null)
   useEffect(() => { setZoneStats(null); api.zoneStats(symbol, tf).then(setZoneStats).catch(() => {}) }, [symbol, tf])
+  // price alerts of this symbol (refreshed so a fired alert disappears from the chart)
+  const [alerts, setAlerts] = useState<PriceAlert[]>([])
+  const [alertOffer, setAlertOffer] = useState<{ z: ZoneRef; x: number; y: number } | null>(null)
+  const [pickPrice, setPickPrice] = useState(false)
+  const [alertErr, setAlertErr] = useState<string | null>(null)
+  const loadAlerts = useCallback(() => live.priceAlerts(symbol).then(setAlerts).catch(() => {}), [symbol])
+  useEffect(() => {
+    setAlerts([]); setAlertOffer(null); setPickPrice(false); loadAlerts()
+    const h = setInterval(loadAlerts, 20000)
+    return () => clearInterval(h)
+  }, [loadAlerts])
+  const addAlert = async (z: ZoneRef) => {
+    setAlertErr(null)
+    try { await live.addPriceAlert({ symbol, tf, label: z.label, top: z.top, bottom: z.bottom }); setAlertOffer(null); loadAlerts() }
+    catch (e) { setAlertErr((e as Error).message) }
+  }
+  const onPricePick = useCallback((p: number) => {
+    setPickPrice(false)
+    addAlert({ top: p, bottom: p, label: `Price ${fmt.price(p)}` })
+  }, [symbol, tf]) // eslint-disable-line react-hooks/exhaustive-deps
 
   const lastIndex = bars ? bars.first_index + bars.time.length - 1 : 0
   const visibleEnd = replay && cursor !== null ? cursor : lastIndex
@@ -195,7 +215,21 @@ export default function ChartPage({ theme }: { theme: string }) {
         <div className="panel" style={{ display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
           <PriceChart bars={bars} showCount={showCount} overlays={overlays} layers={layers} keyZones={zones}
             selectedZone={selZone} marker={marker} theme={theme} liveBar={liveBar} zoneStats={zoneStats} onBarClick={onBarClick}
-            setupView={replay ? null : setupView} showOccurrences={showOcc} />
+            setupView={replay ? null : setupView} showOccurrences={showOcc}
+            priceAlerts={replay ? [] : alerts} onZoneClick={replay ? undefined : (z, x, y) => setAlertOffer({ z, x, y })}
+            onPricePick={pickPrice ? onPricePick : null} />
+          {alertOffer && (
+            <div className="zone-tip" style={{ left: Math.min(alertOffer.x + 16, 9999), top: alertOffer.y + 70, pointerEvents: 'auto' }}>
+              <div className="row" style={{ gap: 8 }}>
+                <b>{alertOffer.z.label}</b>
+                <span className="grow" />
+                <button className="btn sm ghost" aria-label="Close" onClick={() => setAlertOffer(null)}>✕</button>
+              </div>
+              <div className="num muted">{fmt.price(alertOffer.z.bottom)}–{fmt.price(alertOffer.z.top)}</div>
+              <button className="btn sm primary" style={{ marginTop: 6 }} onClick={() => addAlert(alertOffer.z)}>🔔 Alert me when price reaches this zone</button>
+              {alertErr && <div className="small neg">{alertErr}</div>}
+            </div>
+          )}
           <div className="replay-bar">
             {!replay && !pickStart && <button className="btn sm" onClick={startReplay} disabled={!bars}>▶ Replay from a bar…</button>}
             {pickStart && <><span className="chip accent">Click the bar where replay should start</span><button className="btn sm ghost" onClick={() => setPickStart(false)}>Cancel</button></>}
@@ -225,6 +259,27 @@ export default function ChartPage({ theme }: { theme: string }) {
         </div>
 
         <div className="side">
+          <div className="panel">
+            <div className="panel-head">
+              <h3>Price alerts</h3>
+              <button className={`btn sm ${pickPrice ? 'on' : ''}`} disabled={replay} onClick={() => setPickPrice(v => !v)}
+                title="Then click a price on the chart">{pickPrice ? 'Click a price… (cancel)' : '🔔 Alert at price'}</button>
+            </div>
+            <div className="panel-body" style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+              {alerts.length === 0 && <span className="muted small">Click a zone on the chart, or use “Alert at price”. You get Telegram + an in-app pop-up when price reaches it.</span>}
+              {alerts.slice(0, 12).map(a => (
+                <div key={a.id} className="row small" style={{ gap: 6, opacity: a.status === 'active' ? 1 : 0.6 }}>
+                  <span>{a.status === 'active' ? '🔔' : '✓'}</span>
+                  <span className="grow" title={a.tf ? `drawn on ${a.tf}` : ''}>
+                    {a.label} <span className="num faint">{a.top === a.bottom ? fmt.price(a.top) : `${fmt.price(a.bottom)}–${fmt.price(a.top)}`}</span>
+                    {a.status === 'triggered' && <span className="faint"> · reached {fmt.local(a.triggered_at!)}{a.late ? ' (late)' : ''}</span>}
+                    {a.status === 'active' && !a.armed_at && <span className="faint"> · price is inside it now</span>}
+                  </span>
+                  <button className="btn sm ghost" aria-label="Delete alert" title="Delete" onClick={() => live.deletePriceAlert(a.id).then(loadAlerts)}>✕</button>
+                </div>
+              ))}
+            </div>
+          </div>
           {setupRef && <SetupPanel name={setupRef.name} view={setupView} showOcc={showOcc} setShowOcc={setShowOcc}
             onClose={() => { setSetupRef(null); setSetupView(null) }}
             onReplay={t => openChartAt({ symbol, tf, time: t, replay: true, label: setupRef.name, direction: setupRef.direction === 'both' ? undefined : setupRef.direction })} />}

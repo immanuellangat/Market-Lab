@@ -135,6 +135,13 @@ export interface SetupView {
 }
 
 // ------------------------------------------------------------------ live
+/** a zone or level the user wants to hear about when price reaches it (fires once) */
+export interface PriceAlert {
+  id: number; created: number; symbol: string; tf: string | null; label: string; top: number; bottom: number
+  status: 'active' | 'triggered'; armed_at: number | null; triggered_at: number | null; trigger_price: number | null
+  late: number; price?: number | null
+}
+
 // forward-test scoreboard (/api/live/scoreboard)
 export interface ScoreStats { n: number; wins?: number; win_rate?: number; avg_r?: number; total_r?: number; per_month?: number; sd_r?: number | null; expected_signals?: number }
 export interface ScoreRow {
@@ -201,6 +208,10 @@ export const live = {
   status: () => req<LiveStatus>('/api/live/status'),
   toggle: (enabled: boolean) => post<{ enabled: boolean }>('/api/live/toggle', { enabled }),
   scanNow: () => post<{ new_signals: number }>('/api/live/scan_now', {}),
+  priceAlerts: (symbol?: string, triggeredSince?: number) =>
+    req<PriceAlert[]>(`/api/live/price_alerts?${qs({ symbol, triggered_since: triggeredSince })}`),
+  addPriceAlert: (a: { symbol: string; tf?: string; label: string; top: number; bottom: number }) => post<PriceAlert>('/api/live/price_alerts', a),
+  deletePriceAlert: (id: number) => req<{ ok: boolean }>(`/api/live/price_alerts/${id}`, { method: 'DELETE' }),
   scoreboard: (force = false) => req<Scoreboard>(`/api/live/scoreboard${force ? '?force=true' : ''}`),
   watchlist: () => req<Watch[]>('/api/live/watchlist'),
   addWatch: (w: WatchRequest) => post<Watch>('/api/live/watchlist', w),

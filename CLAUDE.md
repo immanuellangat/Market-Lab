@@ -128,6 +128,11 @@ with the other watches (10-20% time together, weekly corr ~0). Without the CRT/S
    (setting `last_scanned` {"SYM|TF": unix}, at most CATCHUP_BARS=24) are checked, cooldown respected; such signals
    carry payload.late_bars and are labelled LATE in Telegram, toasts and signal cards. First scan after install only
    checks the newest candle. CRT/SMC strategy watches still check only the latest candle (scoreboard covers them).
+2g. DONE 2026-10-19: PRICE-ZONE ALERTS (`live/price_alerts.py`, table `price_alerts`, `GET/POST/DELETE
+   /api/live/price_alerts`). Chart: click any zone (S/D, S/R, FVG, OB, trade zone) -> "Alert me when price reaches this
+   zone"; "Alert at price" button then click a price -> level alert. Checked every live tick (LiveService.tick) against
+   the forming M5 candle's high/low; after downtime against closed M5 candles (late=1). Created inside the band ->
+   unarmed until price leaves. Fires once: Telegram + in-app toast (`usePriceAlertToasts`). Drawn on chart as 🔔.
 3. Optional: show recently filled zones (last ~50 candles) by default on the chart.
 4. DONE 2026-10-07: "View on chart" for watched setups (Live page) and discovered patterns (library row + pattern page).
    `/api/setup_view` -> checklist (met/not, price level where one exists via `_LEVEL_OF`/`_PD_FRACTION` in routes.py)

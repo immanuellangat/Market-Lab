@@ -149,6 +149,38 @@ def add_watch(req: WatchReq):
     return _clean(db.get_watch(wid))
 
 
+class PriceAlertReq(BaseModel):
+    symbol: str
+    tf: str | None = None
+    label: str
+    top: float
+    bottom: float
+
+
+@router.get("/price_alerts")
+def price_alerts_list(symbol: str | None = None, triggered_since: int | None = None):
+    """Active + recent alerts (optionally one symbol); triggered_since -> only alerts that fired after it."""
+    from ..live import price_alerts as pa
+    rows = db.list_price_alerts(symbol=symbol, triggered_since=triggered_since)
+    return [r | {"text": pa.format_alert(r) if r["status"] == "triggered" else None} for r in rows
+            if r["status"] != "cancelled"]
+
+
+@router.post("/price_alerts")
+def price_alerts_add(req: PriceAlertReq):
+    from ..live import price_alerts as pa
+    from ..data.mt5_source import source
+    if req.symbol not in SYMBOLS:
+        raise HTTPException(400, "Unknown symbol")
+    return _clean(pa.create(source, req.symbol, req.tf, req.label[:120], req.top, req.bottom))
+
+
+@router.delete("/price_alerts/{aid}")
+def price_alerts_delete(aid: int):
+    db.update_price_alert(aid, status="cancelled")
+    return {"ok": True}
+
+
 @router.get("/scoreboard")
 def scoreboard(force: bool = False):
     """Forward-test scoreboard: each watch's trades since its rule was chosen vs its unseen backtest."""

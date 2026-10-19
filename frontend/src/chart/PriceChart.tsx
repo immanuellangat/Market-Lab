@@ -3,7 +3,7 @@ import {
   CandlestickSeries, ColorType, CrosshairMode, LineSeries, LineStyle, LineType, createChart, createSeriesMarkers,
   type IChartApi, type ISeriesApi, type ISeriesMarkersPluginApi, type SeriesMarker, type Time, type UTCTimestamp,
 } from 'lightweight-charts'
-import type { Bars, KeyZones, Overlays, QuickStats, SdZone, SetupView, SrZone, TradeZone, Zone } from '../api'
+import type { Bars, KeyZones, Overlays, PriceAlert, QuickStats, SdZone, SetupView, SrZone, TradeZone, Zone } from '../api'
 import { TZ_LABEL, TZ_OFFSET, fmt } from '../state'
 import { OverlayPrimitive, type Rect, type Seg } from './overlayPrimitive'
 
@@ -27,7 +27,15 @@ interface Props {
   /** a setup drawn on the chart: condition lines + past occurrences */
   setupView?: SetupView | null
   showOccurrences?: boolean
+  /** active price alerts of this symbol (drawn with a bell) */
+  priceAlerts?: PriceAlert[]
+  /** a zone was clicked: offer an alert for it (x/y = click position in the chart) */
+  onZoneClick?: (z: ZoneRef, x: number, y: number) => void
+  /** when set, the next click picks a price instead of a bar */
+  onPricePick?: ((price: number) => void) | null
 }
+
+export interface ZoneRef { top: number; bottom: number; label: string }
 
 // Lightweight Charts renders timestamps as UTC; shifting by the local offset displays local time.
 const ct = (t: number) => (t + TZ_OFFSET) as UTCTimestamp
@@ -45,7 +53,7 @@ const alpha = (hex: string, a: number) => {
   return `rgba(${n >> 16},${(n >> 8) & 255},${n & 255},${a})`
 }
 
-export default function PriceChart({ bars, showCount, overlays, layers, keyZones, selectedZone, marker, theme, liveBar, zoneStats, onBarClick, setupView, showOccurrences = true }: Props) {
+export default function PriceChart({ bars, showCount, overlays, layers, keyZones, selectedZone, marker, theme, liveBar, zoneStats, onBarClick, setupView, showOccurrences = true, priceAlerts, onZoneClick, onPricePick }: Props) {
   const box = useRef<HTMLDivElement>(null)
   const chart = useRef<IChartApi | null>(null)
   const candles = useRef<ISeriesApi<'Candlestick'> | null>(null)
@@ -60,6 +68,11 @@ export default function PriceChart({ bars, showCount, overlays, layers, keyZones
   const zoneById = useRef<Record<string, Zone>>({})
   const lvlById = useRef<Record<string, SdZone | SrZone>>({})
   clickRef.current = onBarClick
+  const zoneClickRef = useRef(onZoneClick)
+  zoneClickRef.current = onZoneClick
+  const pickRef = useRef(onPricePick)
+  pickRef.current = onPricePick
+  const refById = useRef<Record<string, ZoneRef>>({})
   barsRef.current = bars
 
   // create chart once
@@ -82,6 +95,16 @@ export default function PriceChart({ bars, showCount, overlays, layers, keyZones
     }
     c.subscribeClick(p => {
       const b = barsRef.current
+      if (p.point && pickRef.current) {
+        const price = s.coordinateToPrice(p.point.y)
+        if (price !== null) pickRef.current(price as number)
+        return
+      }
+      if (p.point && zoneClickRef.current) {
+        const id = prim.current.hitTestAt(p.point.x, p.point.y)
+        const z = id ? refById.current[id] : undefined
+        if (z) zoneClickRef.current(z, p.point.x, p.point.y)
+      }
       if (!b || p.logical === undefined || p.logical === null) return
       clickRef.current?.(b.first_index + Math.round(p.logical))
     })
@@ -176,6 +199,7 @@ export default function PriceChart({ bars, showCount, overlays, layers, keyZones
       if (o.eLabel !== undefined) segs.push({ l1, l2, price: entry, color: t.text, width: 1.5, label: o.eLabel || undefined })
     }
 
+    const refs: Record<string, ZoneRef> = {}
     if (overlays) {
       const byId: Record<string, Zone> = {}
       overlays.zones.forEach((z, k) => {
@@ -188,6 +212,7 @@ export default function PriceChart({ bars, showCount, overlays, layers, keyZones
         const col = bull ? t.bull : t.bear
         const id = `z${k}`
         byId[id] = z
+        refs[id] = { top: z.top, bottom: z.bottom, label: `${bull ? 'Bullish' : 'Bearish'} ${isFvg ? 'FVG' : 'order block'}` }
         // order blocks: solid border; FVGs: dashed border. Green = bullish, red = bearish.
         // spent zones: dashed and paler; labelled only when they ended recently (keeps the chart readable)
         const recent = !fresh && L(z.end!) >= last - 50
@@ -209,6 +234,7 @@ export default function PriceChart({ bars, showCount, overlays, layers, keyZones
           const col = sup ? t.bull : t.bear
           const id = `sr${k}`
           lvl[id] = z
+          refs[id] = { top: z.top, bottom: z.bottom, label: `${sup ? 'Support' : 'Resistance'} (${z.touches} touches)` }
           rects.push({ l1: L(Math.max(z.start, off)), l2: 'right', top: z.top, bottom: z.bottom,
             fill: alpha(col, 0.07), stroke: alpha(col, 0.55), dash: true, id,
             label: `${sup ? 'Support' : 'Resistance'} · ${z.inside ? 'price in zone' : `${Math.round(z.p_reach * 100)}% reach in ${z.horizon} bars`} · ${z.touches} touches${z.flip ? ' · flip' : ''}`,
@@ -225,6 +251,7 @@ export default function PriceChart({ bars, showCount, overlays, layers, keyZones
           const id = `sd${k}`
           lvl[id] = z
           const name = `${dem ? 'Demand' : 'Supply'}${z.pattern !== 'base' ? ` (${z.pattern})` : ''}`
+          refs[id] = { top: z.top, bottom: z.bottom, label: `${name} zone` }
           rects.push({ l1: L(z.start), l2: fresh ? last + 0.5 : L(z.end!), top: z.top, bottom: z.bottom,
             fill: alpha(col, fresh ? 0.2 : 0.08), stroke: alpha(col, fresh ? 1 : 0.5), dash: !fresh, id,
             label: fresh ? `${name} · ${z.status === 'fresh' ? 'fresh' : `tested ${z.touches}×`}` : `broken ${name}`,
@@ -268,14 +295,23 @@ export default function PriceChart({ bars, showCount, overlays, layers, keyZones
 
     if (layers.zones && keyZones) {
       const zs = [...keyZones.buy_zones, ...keyZones.sell_zones]
-      for (const z of zs) {
+      zs.forEach((z, k) => {
         const bull = z.direction === 'long'
         const sel = selectedZone && selectedZone.start_i === z.start_i && selectedZone.kind === z.kind
-        rects.push({ l1: L(Math.max(z.start_i, off)), l2: 'right', top: z.top, bottom: z.bottom,
+        refs[`kz${k}`] = { top: z.top, bottom: z.bottom, label: `${bull ? 'Buy' : 'Sell'} zone · ${z.label}` }
+        rects.push({ id: `kz${k}`, l1: L(Math.max(z.start_i, off)), l2: 'right', top: z.top, bottom: z.bottom,
           fill: alpha(bull ? t.bull : t.bear, sel ? 0.28 : 0.14), stroke: bull ? t.bull : t.bear,
           label: `${bull ? 'BUY' : 'SELL'} ZONE · ${z.label} · ${z.stats.grade}`, labelColor: bull ? t.bull : t.bear })
-      }
+      })
     }
+    // active price alerts: bell outline (zone) or bell line (level), from the last ~40 candles to the edge
+    for (const a of priceAlerts ?? []) {
+      if (a.status !== 'active') continue
+      const lab = `🔔 ${a.label}${a.armed_at ? '' : ' · waiting for price to leave it'}`
+      if (a.top === a.bottom) segs.push({ l1: Math.max(0, last - 40), l2: 'right', price: a.top, color: t.accent, dash: true, width: 1.5, label: lab })
+      else rects.push({ l1: Math.max(0, last - 40), l2: 'right', top: a.top, bottom: a.bottom, fill: alpha(t.accent, 0.06), stroke: t.accent, dash: true, label: lab, labelColor: t.accent })
+    }
+    refById.current = refs
     if (selectedZone) {
       const z = selectedZone
       const start = L(Math.max(z.start_i, off))
@@ -362,7 +398,7 @@ export default function PriceChart({ bars, showCount, overlays, layers, keyZones
     mk.sort((a, b) => (a.time as number) - (b.time as number))
     markers.current?.setMarkers(mk)
     prim.current.setShapes({ rects, segs })
-  }, [bars, showCount, overlays, layers, keyZones, selectedZone, marker, theme, setupView, showOccurrences])
+  }, [bars, showCount, overlays, layers, keyZones, selectedZone, marker, theme, setupView, showOccurrences, priceAlerts])
 
   // room on the right for a projected position (like a trading platform's position tool)
   const projecting = !!selectedZone || !!(setupView && setupView.entry_zone.available)
@@ -385,7 +421,7 @@ export default function PriceChart({ bars, showCount, overlays, layers, keyZones
       <div className="chart-legend num">{legend}</div>
       {hover && bars && <ZoneTip h={hover} bars={bars} stats={zoneStats?.[hover.zone.kind]} />}
       {!hover && hoverLvl && bars && <LevelTip h={hoverLvl} bars={bars} stats={zoneStats} />}
-      <div ref={box} className="chart-box" />
+      <div ref={box} className="chart-box" style={onPricePick ? { cursor: 'crosshair' } : undefined} />
     </div>
   )
 }

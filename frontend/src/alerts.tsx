@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
-import { live, type Signal } from './api'
+import { live, type PriceAlert, type Signal } from './api'
 import { fmt } from './state'
 
 const KEY = 'lastSignalId'
@@ -67,4 +67,42 @@ export function useSignalAlerts() {
   }, [])
 
   return { toasts, dismiss: (id: number) => setToasts(t => t.filter(s => s.id !== id)) }
+}
+
+const PA_KEY = 'lastPriceAlertAt'
+
+export function priceAlertTitle(a: PriceAlert) {
+  return `${a.late ? 'LATE · ' : ''}🔔 ${a.symbol} reached ${a.label}`
+}
+
+/** Polls for price alerts that fired; returns the unseen ones for in-app toasts. */
+export function usePriceAlertToasts() {
+  const [toasts, setToasts] = useState<PriceAlert[]>([])
+  const since = useRef<number | null>((() => { try { const v = localStorage.getItem(PA_KEY); return v === null ? null : Number(v) } catch { return null } })())
+
+  useEffect(() => {
+    let stop = false
+    const poll = async () => {
+      try {
+        const first = since.current === null
+        const rows = await live.priceAlerts(undefined, since.current ?? Math.floor(Date.now() / 1000) - 60)
+        const fired = rows.filter(r => r.status === 'triggered' && r.triggered_at)
+        if (stop) return
+        const latest = Math.max(since.current ?? 0, ...fired.map(r => r.triggered_at!), first ? Math.floor(Date.now() / 1000) : 0)
+        since.current = latest
+        try { localStorage.setItem(PA_KEY, String(latest)) } catch { /* ignore */ }
+        if (first || !fired.length) return
+        setToasts(t => [...fired, ...t].slice(0, 5))
+        beep()
+        if (notifyPermission() === 'granted') {
+          for (const a of fired) new Notification(priceAlertTitle(a), { body: `Price ≈ ${fmt.price(a.trigger_price)}`, tag: `pa-${a.id}` })
+        }
+      } catch { /* backend busy or offline: try again next poll */ }
+    }
+    poll()
+    const h = setInterval(poll, POLL_MS)
+    return () => { stop = true; clearInterval(h) }
+  }, [])
+
+  return { paToasts: toasts, dismissPa: (id: number) => setToasts(t => t.filter(a => a.id !== id)) }
 }

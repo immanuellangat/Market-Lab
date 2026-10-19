@@ -44,6 +44,18 @@ CREATE TABLE IF NOT EXISTS signals (
     UNIQUE (watch_id, bar_time)
 );
 CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY, value TEXT);
+CREATE TABLE IF NOT EXISTS price_alerts (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    created INTEGER NOT NULL,
+    symbol TEXT NOT NULL,
+    tf TEXT,                          -- timeframe the zone was drawn on (context only)
+    label TEXT NOT NULL,
+    top REAL NOT NULL, bottom REAL NOT NULL,   -- a price level has top == bottom
+    status TEXT NOT NULL DEFAULT 'active',     -- active / triggered / cancelled
+    armed_at INTEGER,                 -- NULL while price is still inside the zone it was created in
+    last_checked INTEGER,
+    triggered_at INTEGER, trigger_price REAL, late INTEGER NOT NULL DEFAULT 0
+);
 """)
 _conn.commit()
 # migration: execution plan per watched setup (added with the execution study)
@@ -181,4 +193,37 @@ def set_setting(key: str, value) -> None:
     with _lock:
         _conn.execute("INSERT INTO settings (key,value) VALUES (?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value",
                       (key, json.dumps(value)))
+        _conn.commit()
+
+
+# ------------------------------------------------------------------ price alerts
+def add_price_alert(a: dict) -> int:
+    with _lock:
+        cur = _conn.execute("INSERT INTO price_alerts (created,symbol,tf,label,top,bottom,armed_at,last_checked)"
+                            " VALUES (?,?,?,?,?,?,?,?)",
+                            (int(time.time()), a["symbol"], a.get("tf"), a["label"], a["top"], a["bottom"],
+                             a.get("armed_at"), int(time.time())))
+        _conn.commit()
+        return cur.lastrowid
+
+
+def list_price_alerts(symbol: str | None = None, status: str | None = None, triggered_since: int | None = None,
+                      limit: int = 200) -> list[dict]:
+    q, args = "SELECT * FROM price_alerts WHERE 1=1", []
+    if symbol:
+        q += " AND symbol=?"; args.append(symbol)
+    if status:
+        q += " AND status=?"; args.append(status)
+    if triggered_since is not None:
+        q += " AND triggered_at > ?"; args.append(triggered_since)
+    q += " ORDER BY id DESC LIMIT ?"; args.append(limit)
+    with _lock:
+        return [dict(r) for r in _conn.execute(q, args).fetchall()]
+
+
+def update_price_alert(aid: int, **fields) -> None:
+    if not fields:
+        return
+    with _lock:
+        _conn.execute(f"UPDATE price_alerts SET {', '.join(f'{k}=?' for k in fields)} WHERE id=?", (*fields.values(), aid))
         _conn.commit()
