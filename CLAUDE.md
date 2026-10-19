@@ -15,7 +15,7 @@ Local price-action research platform (see README.md for features and layout).
   Server clock = New York + 7h; MT5 request bounds are in server time (fetch extends end by +1 day).
 - Shortcuts: Desktop / Start menu / Startup "Market Lab.lnk" → `start.bat` (opens Chrome `--app` window); MT5 also in Startup.
 - GitHub: https://github.com/immanuellangat/Market-Lab (HTTPS remote; commit as `immanuellangat <immanuellangat9557@gmail.com>`).
-  Only commit/push when the user asks. Everything up to commit e987a2d (2026-10-19, zone backtest study + forward-test scoreboard) is pushed.
+  Only commit/push when the user asks. Everything up to commit 4d28844 (2026-10-19, Alchemist test + catch-up scanning) is pushed.
 
 ## Working principles the user has accepted
 - Honest statistics: in-sample vs out-of-sample split (last 30% unseen), purged split, costs included,
