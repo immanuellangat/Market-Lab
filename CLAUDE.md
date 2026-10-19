@@ -15,7 +15,7 @@ Local price-action research platform (see README.md for features and layout).
   Server clock = New York + 7h; MT5 request bounds are in server time (fetch extends end by +1 day).
 - Shortcuts: Desktop / Start menu / Startup "Market Lab.lnk" → `start.bat` (opens Chrome `--app` window); MT5 also in Startup.
 - GitHub: https://github.com/immanuellangat/Market-Lab (HTTPS remote; commit as `immanuellangat <immanuellangat9557@gmail.com>`).
-  Only commit/push when the user asks. Everything up to commit 80692d9 (2026-10-19, portfolio, win-rate study, S/D + S/R zones, position boxes) is pushed.
+  Only commit/push when the user asks. Everything up to commit e987a2d (2026-10-19, zone backtest study + forward-test scoreboard) is pushed.
 
 ## Working principles the user has accepted
 - Honest statistics: in-sample vs out-of-sample split (last 30% unseen), purged split, costs included,
@@ -83,7 +83,13 @@ with the other watches (10-20% time together, weekly corr ~0). Without the CRT/S
      = 1344 rules, ~1M trades. 0 validated. M5/M15: gross ~0, costs make every setup lose (-0.1..-0.6R) — LTF is dead
      for these concepts with this broker's spreads. Best = H1 SMC (live #11/#12). No PA rule held out-of-sample.
      User asked: SMC on H1 only. APA = plain price action.
-   - Alchemist: rules unknown — the user said (2026-10-19) they will send a description; do NOT invent rules.
+   - ALCHEMIST TESTED 2026-10-19 (`strategies/alchemist.py`, setting `strategy_alchemist`). User's description was
+     generic (direction -> sweep -> CHoCH/BOS -> OB/FVG entry -> stop beyond sweep extreme -> next liquidity or 1:2/1:3),
+     i.e. the SMC setup plus BOS, sweep-extreme stop and 3R. 108 pre-registered rules (M15/H1/H4 x htf-direction/none x
+     choch/any x fvg/ob/any x r2/r3/liq), 6 markets pooled: 0 VALIDATED. Gross edge ~0 (H1 median +0.01R); M15 0/36
+     positive unseen; H4 34/36 positive unseen but negative in-sample (q=1). HTF direction filter did not help.
+     Stops are NOT tight: by the retest the sweep extreme is a median 3.4 ATR away (only 3% <= 1 ATR); 40% time out.
+     Not wired to live/UI.
 2. DONE 2026-10-07: Portfolio page (sidebar "Portfolio", `pages/PortfolioPage.tsx`, `GET/POST /api/execution/portfolio`,
    last result in setting `portfolio_last`). Includes CRT/SMC strategy watches (`portfolio._strategy_trades`).
    Result (active watches, 1% risk): all history CAGR 42% / max DD 21%; unseen-only CAGR 51% / max DD 9%;
@@ -117,8 +123,11 @@ with the other watches (10-20% time together, weekly corr ~0). Without the CRT/S
    2026-10-07 when the CRT/SMC rules were chosen; override via setting `forward_since` {id: unix}). Expected = unseen
    backtest trades before that date. Checks: binomial win rate, normal R/trade, Poisson signal count (5%); verdict
    needs 10+ trades. First run: 3 forward trades (#16 +1.95R, #18 -1.04R, #19 +1.96R), all "too early"; #7 had 0
-   signals vs ~4 expected. NOTE: signals table is empty since the 2026-10-17 reset and the scanner only checks the
-   newest candle when new bars arrive, so signals that fire while the app is closed are never alerted ("missed").
+   signals vs ~4 expected. Signals table was empty since the 2026-10-17 reset.
+2f. DONE 2026-10-19: catch-up scanning for PATTERN watches (`LiveService.scan`): candles closed since the last scan
+   (setting `last_scanned` {"SYM|TF": unix}, at most CATCHUP_BARS=24) are checked, cooldown respected; such signals
+   carry payload.late_bars and are labelled LATE in Telegram, toasts and signal cards. First scan after install only
+   checks the newest candle. CRT/SMC strategy watches still check only the latest candle (scoreboard covers them).
 3. Optional: show recently filled zones (last ~50 candles) by default on the chart.
 4. DONE 2026-10-07: "View on chart" for watched setups (Live page) and discovered patterns (library row + pattern page).
    `/api/setup_view` -> checklist (met/not, price level where one exists via `_LEVEL_OF`/`_PD_FRACTION` in routes.py)

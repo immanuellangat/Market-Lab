@@ -29,7 +29,8 @@ export const notifyPermission = () => (typeof Notification === 'undefined' ? 'un
 export const requestNotify = () => (typeof Notification === 'undefined' ? Promise.resolve('unsupported') : Notification.requestPermission())
 
 export function signalTitle(s: Signal) {
-  return `${s.direction === 'long' ? 'BUY' : 'SELL'} ${s.symbol} ${s.tf} — ${s.payload.name}`
+  const late = s.payload.late_bars
+  return `${late ? `LATE (${late} candle${late === 1 ? '' : 's'} ago) · ` : ''}${s.direction === 'long' ? 'BUY' : 'SELL'} ${s.symbol} ${s.tf} — ${s.payload.name}`
 }
 
 /** Polls for new signals; returns the unseen ones for in-app toasts. */

@@ -116,6 +116,7 @@ function SignalCard({ s }: { s: Signal }) {
           <b>{s.symbol} {s.tf}</b>
           <span className="muted">{p.name}</span>
           {p.unproven && <span className="chip warn" title="No statistically confirmed edge yet: this signal is part of a forward test.">unproven</span>}
+          {!!p.late_bars && <span className="chip warn" title="Found on catch-up: it fired while the app was closed or offline. Price has moved since — check it before acting.">late · {p.late_bars} candle{p.late_bars === 1 ? '' : 's'} ago</span>}
           <span className="grow" />
           <span className={`chip ${statusCls}`}>{s.status === 'open' ? 'open' : `${s.status} ${fmt.r(s.result_r)}`}</span>
           <span className="small faint" title={fmt.date(s.bar_time) + ' UTC'}>{ago(s.detected_at)}</span>

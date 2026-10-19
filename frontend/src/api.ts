@@ -167,6 +167,8 @@ export interface Watch {
 export interface SignalPayload {
   name: string; conditions: string[]; condition_labels: string[]; target_r: number; stop_atr: number | null; atr: number
   strategy?: string; stop_text?: string; target_text?: string; unproven?: boolean
+  /** found on catch-up: the signal candle closed this many candles before it was detected */
+  late_bars?: number
   liquidity_targets: Level[]; context: { id: string; label: string; category: string; bias: Bias }[]
   stats: WatchStats['stats'] | null; evidence: Evidence | null; decay: Decay | null; stats_as_of: number | null
   similar: { k: number; of: number; win_rate: number; avg_r: number; all_avg_r: number; mean_similarity: number;

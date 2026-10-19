@@ -57,7 +57,9 @@ def format_signal(s: dict) -> str:
     o = st.get("out_of_sample", {})
     ev = p.get("evidence") or {}
     arrow = "🟢 BUY" if s["direction"] == "long" else "🔴 SELL"
+    late = p.get("late_bars") or 0
     lines = [
+        *([f"⏱ <b>LATE</b>: fired {late} candle{'s' if late != 1 else ''} ago while the app was offline — check price before acting."] if late else []),
         f"<b>{arrow} {s['symbol']} {s['tf']}</b> — {html.escape(p['name'])}",
         f"Entry ≈ {_p(s['entry'])} · SL {_p(s['stop'])} · TP {_p(s['target'])} ({p['target_r']:g}R)",
     ]

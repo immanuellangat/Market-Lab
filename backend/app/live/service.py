@@ -31,6 +31,7 @@ from ..strategies import crt, live as strat
 from . import db, notify
 
 TICK_SECONDS = 10
+CATCHUP_BARS = 24          # after downtime, candles since the last scan are checked too (at most this many)
 GRACE_SECONDS = 4          # wait a moment after the candle closes so the broker has it
 STATS_REFRESH_SECONDS = 24 * 3600
 SIMILAR_K = 30
@@ -152,29 +153,38 @@ class LiveService:
         with self._scan_lock:
             df, rec = engine.live_features(symbol, tf)
             last = len(df) - 1
-            bar_time = _unix(df["time"].iloc[last])
+            times = df["time"].dt.tz_convert(None).to_numpy().astype("datetime64[s]").astype("int64")
+            # candles closed since the previous scan (the app may have been closed or offline meanwhile)
+            scanned = db.get_setting("last_scanned") or {}
+            key = f"{symbol}|{tf}"
+            prev_scan = scanned.get(key)
+            first = last if prev_scan is None else int(np.searchsorted(times, prev_scan, side="right"))
+            first = min(last, max(first, last - CATCHUP_BARS + 1))
             created = []
             for w in watches:
                 if strat.is_strategy(w):
                     created += self._scan_strategy(w, force)
                     continue
                 try:
-                    hit = bool(evaluate(df, w["conditions"])[last])
+                    mask = evaluate(df, w["conditions"])
                 except KeyError as e:
                     self._log(f"watch #{w['id']} skipped: {e}")
                     continue
-                if not hit:
-                    continue
-                prev = db.last_signal_time(w["id"])
-                if prev is not None:
-                    if prev >= bar_time:
+                for i in range(first, last + 1):
+                    if not mask[i]:
                         continue
-                    bars_since = int((df["time"] > pd.Timestamp(prev, unit="s", tz="UTC")).sum())
-                    if bars_since <= w["cooldown"] and not force:
-                        continue
-                sid = self._make_signal(w, df, rec, last, bar_time)
-                if sid:
-                    created.append(sid)
+                    prev = db.last_signal_time(w["id"])
+                    if prev is not None:
+                        if prev >= times[i]:
+                            continue
+                        bars_since = int(i - np.searchsorted(times, prev, side="left"))
+                        if bars_since <= w["cooldown"] and not force:
+                            continue
+                    sid = self._make_signal(w, df, rec, i, int(times[i]), late_bars=last - i)
+                    if sid:
+                        created.append(sid)
+            scanned[key] = int(times[last])
+            db.set_setting("last_scanned", scanned)
             return created
 
     def _scan_strategy(self, w: dict, force: bool = False) -> list[int]:
@@ -275,7 +285,8 @@ class LiveService:
             n += len(self.scan(symbol, tf))
         return n
 
-    def _make_signal(self, w: dict, df: pd.DataFrame, rec, last: int, bar_time: int) -> int | None:
+    def _make_signal(self, w: dict, df: pd.DataFrame, rec, last: int, bar_time: int, late_bars: int = 0) -> int | None:
+        """`last` = the signal candle; late_bars > 0 when it was found on catch-up (candles closed since)."""
         row = df.iloc[last]
         atr = float(row["atr"])
         entry = float(row["close"])  # the trade is taken at the next candle's open, ~this price
@@ -291,7 +302,7 @@ class LiveService:
                        for t in side if (t["price"] - entry) * sgn > 0][:3]
 
         context = []
-        tail = df.iloc[-600:]
+        tail = df.iloc[max(0, last - 599): last + 1]   # context as it was on the signal candle
         for c in available(tail):
             try:
                 if bool(pd.Series(c.fn(tail)).fillna(False).iloc[-1]):
@@ -314,6 +325,7 @@ class LiveService:
             "liquidity_targets": liq_targets, "context": context,
             "stats": stats.get("stats"), "evidence": stats.get("evidence"), "decay": stats.get("decay"),
             "stats_as_of": stats.get("as_of"), "similar": similar,
+            "late_bars": late_bars,
         }
         s = {"watch_id": w["id"], "symbol": w["symbol"], "tf": w["tf"], "direction": w["direction"],
              "bar_time": bar_time, "entry": entry, "stop": stop,
@@ -321,7 +333,8 @@ class LiveService:
         sid = db.add_signal(s)
         if sid is None:
             return None
-        self._log(f"SIGNAL #{sid}: {w['direction'].upper()} {w['symbol']} {w['tf']} â€” {w['name']}")
+        self._log(f"{'LATE ' if late_bars else ''}SIGNAL #{sid}: {w['direction'].upper()} {w['symbol']} {w['tf']} — {w['name']}"
+                  + (f" ({late_bars} candles ago)" if late_bars else ""))
         if notify.configured():
             try:
                 notify.send(notify.format_signal(s))
