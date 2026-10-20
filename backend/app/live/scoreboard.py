@@ -133,4 +133,5 @@ def scoreboard(force: bool = False) -> dict:
            "rule": (f"Forward trades are rebuilt from candles that closed after each rule was chosen. A check fails when "
                     f"the result is worse than the unseen backtest at the {ALPHA:.0%} level; verdicts need {MIN_JUDGE}+ trades.")}
     _cache[key] = (time.time(), out)
+    db.set_setting("scoreboard_verdicts", {"as_of": out["as_of"], "verdicts": {str(r["id"]): r["verdict"] for r in rows}})
     return out

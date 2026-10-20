@@ -168,6 +168,8 @@ export interface ExitProfiles { exits: ExitOption[]; high_wr: ExitOption | null;
 export interface Watch {
   id: number; created: number; name: string; symbol: string; tf: string; direction: 'long' | 'short' | 'both'
   conditions: string[]; target_r: number; stop_atr: number; cooldown: number; active: number; plan?: string | null
+  /** current edge, used to order the watchlist (tier 3 healthy, 2 weakening, 1 broken/underperforming, 0 paused) */
+  edge?: { tier: number; score: number; now: number | null; was: number | null; n: number; status: string; verdict: string | null; why: string; rank: number }
   stats: WatchStats | null; stats_updated: number
   record?: { signals: number; open: number; wins: number; losses: number; avg_r: number | null; total_r: number }
 }

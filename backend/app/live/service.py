@@ -31,6 +31,7 @@ from ..strategies import crt, live as strat
 from . import db, notify, price_alerts
 
 TICK_SECONDS = 10
+SCOREBOARD_EVERY = 12 * 3600
 CATCHUP_BARS = 24          # after downtime, candles since the last scan are checked too (at most this many)
 GRACE_SECONDS = 4          # wait a moment after the candle closes so the broker has it
 STATS_REFRESH_SECONDS = 24 * 3600
@@ -149,6 +150,23 @@ class LiveService:
                 self.scan(symbol, tf)
             self.resolve_open()
         self._refresh_one_stale_watch()
+        self._refresh_scoreboard()
+
+    def _refresh_scoreboard(self) -> None:
+        """Forward-test verdicts feed the watchlist order; rebuilt in the background every SCOREBOARD_EVERY seconds."""
+        last = (db.get_setting("scoreboard_verdicts") or {}).get("as_of", 0)
+        if time.time() - last < SCOREBOARD_EVERY or getattr(self, "_sb_thread", None) and self._sb_thread.is_alive():
+            return
+
+        def run():
+            from . import scoreboard
+            try:
+                scoreboard.scoreboard(force=True)
+                self._log("forward-test scoreboard refreshed")
+            except Exception as e:
+                self._log(f"scoreboard failed: {e}")
+        self._sb_thread = threading.Thread(target=run, daemon=True, name="scoreboard")
+        self._sb_thread.start()
 
     # ------------------------------------------------------------------ scanning
     def scan(self, symbol: str, tf: str, force: bool = False) -> list[int]:

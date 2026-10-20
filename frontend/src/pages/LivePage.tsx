@@ -269,7 +269,12 @@ function WatchlistPanel({ watches, busy, act }: { watches: Watch[]; busy: string
   const [choosing, setChoosing] = useState<number | null>(null)
   return (
     <div className="panel">
-      <div className="panel-head"><h3>Watched setups</h3><span className="small faint">{watches.filter(w => w.active).length} active</span></div>
+      <div className="panel-head">
+        <h3>Watched setups</h3>
+        <span className="small faint" title="Ordered by the edge each setup shows NOW: its R per trade over the most recent third of its trades. Weakening, broken or underperforming setups drop to the bottom by themselves.">
+          {watches.filter(w => w.active).length} active · strongest edge first
+        </span>
+      </div>
       <div className="panel-body" style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
         {watches.length === 0 && <span className="small muted">Add setups from the Research lab.</span>}
         {watches.map(w => {
@@ -285,9 +290,7 @@ function WatchlistPanel({ watches, busy, act }: { watches: Watch[]; busy: string
                 {ev && <span className="chip">Grade {ev.grade}</span>}
               </div>
               <div className="small muted">{w.name}</div>
-              {w.stats?.decay && (w.stats.decay.status === 'weakening' || w.stats.decay.status === 'broken') && (
-                <div className="small neg">⚠ edge {w.stats.decay.status}</div>
-              )}
+              {w.edge && <EdgeLine e={w.edge} />}
               {!w.conditions[0]?.startsWith('strategy:') && <ExitLine w={w} />}
               {rec && <div className="small num">Live: {rec.signals} signals · {rec.wins}W / {rec.losses}L · {rec.open} open{rec.avg_r !== null ? ` · ${fmt.r(rec.avg_r)} avg` : ''}</div>}
               {choosing === w.id && <ExitChooser w={w} act={act} busy={busy} />}
@@ -359,6 +362,17 @@ function TelegramPanel() {
         )}
         {msg && <div className={`small ${msg.ok ? 'pos' : 'neg'}`}>{msg.text}</div>}
       </div>
+    </div>
+  )
+}
+
+function EdgeLine({ e }: { e: NonNullable<Watch['edge']> }) {
+  const color = e.tier >= 3 ? 'var(--muted)' : e.tier === 2 ? 'var(--warn)' : e.tier === 1 ? 'var(--bear)' : 'var(--faint)'
+  return (
+    <div className="small num" style={{ color }}
+      title={`Rank ${e.rank}. Edge now = R per trade over the most recent ${e.n} trades${e.was !== null ? ', compared with all trades before them' : ''}. ` +
+        'The list is ordered by it (shrunk toward 0 when there are few trades), with weakening, broken and underperforming setups below the rest.'}>
+      #{e.rank} · Edge now {fmt.r(e.now)}{e.was !== null ? ` (was ${fmt.r(e.was)})` : ''} · {e.tier < 3 ? '⚠ ' : ''}{e.why}
     </div>
   )
 }
