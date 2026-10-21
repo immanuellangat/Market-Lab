@@ -188,45 +188,37 @@ def scoreboard(force: bool = False):
     return _clean(sb.scoreboard(force))
 
 
-EDGE_SHRINK = 10   # recent trades needed before the recent average counts at half weight
-
-
-def edge_health(w: dict, verdicts: dict) -> dict:
-    """How strong the edge is NOW, for ordering the watchlist: tier (3 healthy, 2 weakening, 1 broken or
-    underperforming in the forward test, 0 paused), then the recent R per trade shrunk toward 0 for few trades."""
-    s = w.get("stats") or {}
-    d = s.get("decay") or {}
-    oos = (s.get("stats") or {}).get("out_of_sample") or {}
-    if d.get("recent_avg_r") is not None:
-        now, was, n = d["recent_avg_r"], d.get("earlier_avg_r"), d.get("recent_n") or 0
-    else:
-        now, was, n = oos.get("avg_r"), None, oos.get("n") or 0
-    status = d.get("status") or "unknown"
-    verdict = verdicts.get(str(w["id"]))
-    if not w["active"]:
-        tier, why = 0, "paused"
-    elif status == "broken" or verdict == "underperforming":
-        tier, why = 1, "forward test underperforming" if verdict == "underperforming" else "edge broken (recent trades lose)"
-    elif status == "weakening":
-        tier, why = 2, "edge weakening (recent R under half of before)"
-    else:
-        tier, why = 3, status
-    score = (now or 0) * n / (n + EDGE_SHRINK) if n else 0.0
-    return {"tier": tier, "score": score, "now": now, "was": was, "n": n, "status": status, "verdict": verdict, "why": why}
-
-
 @router.get("/watchlist")
 def list_watch():
-    rows = db.list_watches()
-    verdicts = (db.get_setting("scoreboard_verdicts") or {}).get("verdicts", {})
+    from ..live import edge
+    rows = edge.ranked()   # strongest current edge first: a watch whose edge fades moves down by itself
     for w in rows:
         w["record"] = db.watch_record(w["id"])
-        w["edge"] = edge_health(w, verdicts)
-    # strongest current edge first: a watch whose edge fades moves down by itself
-    rows.sort(key=lambda w: (-w["edge"]["tier"], -w["edge"]["score"], w["id"]))
-    for k, w in enumerate(rows):
-        w["edge"]["rank"] = k + 1
     return _clean(rows)
+
+
+# ------------------------------------------------------------------ notifications inbox
+@router.get("/notifications")
+def notifications(kind: str | None = None, unread: bool = False, before_id: int | None = None,
+                  since_id: int | None = None, limit: int = 100):
+    return _clean({"items": db.list_notifications(kind, unread, before_id, since_id, min(limit, 500)),
+                   **db.notification_counts()})
+
+
+@router.get("/notifications/count")
+def notifications_count():
+    return db.notification_counts()
+
+
+class ReadReq(BaseModel):
+    ids: list[int] | None = None   # None = all
+    read: bool = True
+
+
+@router.post("/notifications/read")
+def notifications_read(req: ReadReq):
+    db.mark_notifications_read(req.ids, req.read)
+    return db.notification_counts()
 
 
 class WatchPatch(BaseModel):

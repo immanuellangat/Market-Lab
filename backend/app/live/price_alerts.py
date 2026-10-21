@@ -101,6 +101,12 @@ def check(source) -> list[dict]:
             else:
                 db.update_price_alert(a["id"], armed_at=armed_at, last_checked=now)
     for a in fired:
+        band = f"{a['bottom']:.5g}" if a["top"] == a["bottom"] else f"{a['bottom']:.5g}–{a['top']:.5g}"
+        db.add_notification("price_alert", f"{'LATE · ' if a['late'] else ''}🔔 {a['symbol']} reached {a['label']}",
+                            f"Price ≈ {a['trigger_price']:.5g} · zone {band}" + (f" · drawn on {a['tf']}" if a.get("tf") else "")
+                            + (". Reached while the app was offline: check price now." if a["late"] else ""),
+                            symbol=a["symbol"], tf=a.get("tf"), ref_id=a["id"], level="warn" if a["late"] else "info",
+                            link={"page": "chart", "symbol": a["symbol"], "tf": a.get("tf") or "H1", "time": a["hit_time"]})
         if notify.configured():
             try:
                 notify.send(format_alert(a))

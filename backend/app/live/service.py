@@ -28,10 +28,12 @@ from ..research.zones import _liquidity
 from ..execution.levels import levels_for_entry, signal_spec
 from ..execution.simulate import BASELINE, Plan, simulate
 from ..strategies import crt, live as strat
-from . import db, notify, price_alerts
+from . import db, edge, notify, price_alerts
 
 TICK_SECONDS = 10
 SCOREBOARD_EVERY = 12 * 3600
+MT5_DOWN_NOTIFY = 5 * 60    # tell the user once MT5 has been unreachable this long
+EDGE_CHECK_EVERY = 60
 CATCHUP_BARS = 24          # after downtime, candles since the last scan are checked too (at most this many)
 GRACE_SECONDS = 4          # wait a moment after the candle closes so the broker has it
 STATS_REFRESH_SECONDS = 24 * 3600
@@ -70,6 +72,8 @@ class LiveService:
             return
         self._thread = threading.Thread(target=self._run, daemon=True, name="live-service")
         self._thread.start()
+        self._mt5_last_ok = time.time()
+        threading.Thread(target=self._watchdog, daemon=True, name="mt5-watchdog").start()
 
     def set_enabled(self, on: bool) -> None:
         self.enabled = on
@@ -90,6 +94,49 @@ class LiveService:
 
     # ------------------------------------------------------------------ main step
     def _ensure_mt5(self) -> bool:
+        ok = self._ensure_mt5_inner()
+        self._mt5_watch(ok)
+        return ok
+
+    def _mt5_watch(self, ok: bool) -> None:
+        """Called by the live loop after each connection check: records when MT5 was last reachable and
+        tells the user when it is back after an outage (the outage itself is reported by the watchdog)."""
+        now = time.time()
+        if ok:
+            if getattr(self, "_mt5_down_notified", False):
+                mins = int((now - self._mt5_last_ok) / 60)
+                db.add_notification("system", "MT5 connection restored",
+                                    f"Back after {mins} min. Missed candles are being caught up; signals found are marked LATE.")
+            self._mt5_last_ok, self._mt5_down_notified = now, False
+
+    def _watchdog_check(self) -> bool:
+        """Report an MT5 outage once it lasts MT5_DOWN_NOTIFY seconds. Returns True when it notified."""
+        if not self.enabled or getattr(self, "_mt5_down_notified", False):
+            return False
+        down = time.time() - getattr(self, "_mt5_last_ok", time.time())
+        if down < MT5_DOWN_NOTIFY:
+            return False
+        self._mt5_down_notified = True
+        err = f" ({self.mt5_error.rstrip('.')})" if self.mt5_error else " (the connection attempt has not returned)"
+        text = (f"No connection to MetaTrader 5 for {int(down / 60)} min{err}: no new candles, signals or "
+                f"price alerts until it is back. Is the MT5 terminal running and logged in?")
+        db.add_notification("system", "MT5 connection lost", text, level="error")
+        self._log("MT5 unreachable: user notified")
+        if notify.configured():
+            notify.send(f"<b>⚠ Market Lab: MT5 connection lost</b>\n{text}")
+        return True
+
+    def _watchdog(self) -> None:
+        """Separate thread: a connection attempt can hang for a long time (2026-10-21: MT5 'Authorization failed'
+        froze the live loop for 76 min), so outages are detected here rather than inside the loop."""
+        while True:
+            time.sleep(30)
+            try:
+                self._watchdog_check()
+            except Exception as e:
+                self._log(f"watchdog: {e}")
+
+    def _ensure_mt5_inner(self) -> bool:
         if source.connected and source.alive():
             self.mt5_ok, self.mt5_error = True, None
             return True
@@ -151,6 +198,13 @@ class LiveService:
             self.resolve_open()
         self._refresh_one_stale_watch()
         self._refresh_scoreboard()
+        if time.time() - getattr(self, "_edge_checked", 0) >= EDGE_CHECK_EVERY:
+            self._edge_checked = time.time()
+            try:
+                for w in edge.check_changes():
+                    self._log(f"edge change: watch #{w['id']} is now {w['edge']['why']}")
+            except Exception as e:
+                self._log(f"edge check failed: {e}")
 
     def _refresh_scoreboard(self) -> None:
         """Forward-test verdicts feed the watchlist order; rebuilt in the background every SCOREBOARD_EVERY seconds."""
@@ -167,6 +221,22 @@ class LiveService:
                 self._log(f"scoreboard failed: {e}")
         self._sb_thread = threading.Thread(target=run, daemon=True, name="scoreboard")
         self._sb_thread.start()
+
+    # ------------------------------------------------------------------ inbox
+    @staticmethod
+    def _inbox_signal(sid: int, s: dict) -> None:
+        """Every signal also lands in the in-app notifications inbox."""
+        p = s["payload"]
+        late = p.get("late_bars") or 0
+        ev = p.get("evidence") or {}
+        title = (f"{'LATE · ' if late else ''}{'BUY' if s['direction'] == 'long' else 'SELL'} {s['symbol']} {s['tf']} — {p['name']}")
+        body = (f"Entry ≈ {s['entry']:.5g} · SL {s['stop']:.5g} · TP {s['target']:.5g}"
+                + (f" · grade {ev['grade']}" if ev.get("grade") else "")
+                + (" · unproven strategy (forward test)" if p.get("unproven") else "")
+                + (f". Fired {late} candle{'s' if late != 1 else ''} ago while the app was offline: check price first." if late else ""))
+        db.add_notification("signal", title, body, symbol=s["symbol"], tf=s["tf"], ref_id=sid,
+                            link={"page": "chart", "symbol": s["symbol"], "tf": s["tf"], "time": s["bar_time"]},
+                            level="warn" if late else "info")
 
     # ------------------------------------------------------------------ scanning
     def scan(self, symbol: str, tf: str, force: bool = False) -> list[int]:
@@ -262,6 +332,7 @@ class LiveService:
             if sid is None:
                 continue
             out.append(sid)
+            self._inbox_signal(sid, s)
             self._log(f"SIGNAL #{sid}: {e['direction'].upper()} {w['symbol']} {w['tf']} — {w['name']}")
             if notify.configured():
                 try:
@@ -293,6 +364,7 @@ class LiveService:
         sid = db.add_signal(s)
         if sid is None:
             return None
+        self._inbox_signal(sid, s)
         self._log(f"SIGNAL #{sid}: {e['direction'].upper()} {w['symbol']} {r['htf']} — {w['name']}")
         if notify.configured():
             try:
@@ -356,6 +428,7 @@ class LiveService:
         sid = db.add_signal(s)
         if sid is None:
             return None
+        self._inbox_signal(sid, s)
         self._log(f"{'LATE ' if late_bars else ''}SIGNAL #{sid}: {w['direction'].upper()} {w['symbol']} {w['tf']} — {w['name']}"
                   + (f" ({late_bars} candles ago)" if late_bars else ""))
         if notify.configured():

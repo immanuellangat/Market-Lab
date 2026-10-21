@@ -193,3 +193,12 @@ table.t td.r, table.t th.r { text-align: right; }
 
 /* portfolio stat tiles */
 .stat-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); gap: 12px; }
+
+/* notifications */
+.nav-badge { margin-left: auto; min-width: 18px; height: 18px; padding: 0 5px; border-radius: 9px; background: var(--bear); color: #fff; font-size: 11px; font-weight: 700; display: inline-grid; place-items: center; }
+.notice { display: flex; gap: 10px; align-items: flex-start; padding: 9px 10px; border-radius: 6px; border-left: 3px solid transparent; }
+.notice:hover { background: var(--hover); }
+.notice.unread { background: var(--accent-soft); border-left-color: var(--accent); }
+.notice.unread.warn { border-left-color: var(--warn); }
+.notice.unread.error { border-left-color: var(--bear); }
+.notice-icon { width: 20px; text-align: center; flex: none; }

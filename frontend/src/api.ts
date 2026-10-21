@@ -135,6 +135,14 @@ export interface SetupView {
 }
 
 // ------------------------------------------------------------------ live
+export type NoticeKind = 'signal' | 'price_alert' | 'edge' | 'system'
+export interface Notice {
+  id: number; created: number; kind: NoticeKind; level: 'info' | 'warn' | 'error'; title: string; body: string | null
+  symbol: string | null; tf: string | null; ref_id: number | null; read: number
+  link: { page: string; symbol?: string; tf?: string; time?: number } | null
+}
+export interface NoticeCounts { unread: number; by_kind: Record<string, { total: number; unread: number }> }
+
 /** a zone or level the user wants to hear about when price reaches it (fires once) */
 export interface PriceAlert {
   id: number; created: number; symbol: string; tf: string | null; label: string; top: number; bottom: number
@@ -210,6 +218,10 @@ export const live = {
   status: () => req<LiveStatus>('/api/live/status'),
   toggle: (enabled: boolean) => post<{ enabled: boolean }>('/api/live/toggle', { enabled }),
   scanNow: () => post<{ new_signals: number }>('/api/live/scan_now', {}),
+  notifications: (o: { kind?: string; unread?: boolean; before_id?: number; limit?: number }) =>
+    req<NoticeCounts & { items: Notice[] }>(`/api/live/notifications?${qs({ kind: o.kind, unread: o.unread ? 'true' : undefined, before_id: o.before_id, limit: o.limit })}`),
+  notificationCount: () => req<NoticeCounts>('/api/live/notifications/count'),
+  markNotifications: (ids: number[] | null, read = true) => post<NoticeCounts>('/api/live/notifications/read', { ids, read }),
   priceAlerts: (symbol?: string, triggeredSince?: number) =>
     req<PriceAlert[]>(`/api/live/price_alerts?${qs({ symbol, triggered_since: triggeredSince })}`),
   addPriceAlert: (a: { symbol: string; tf?: string; label: string; top: number; bottom: number }) => post<PriceAlert>('/api/live/price_alerts', a),

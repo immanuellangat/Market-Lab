@@ -44,6 +44,17 @@ CREATE TABLE IF NOT EXISTS signals (
     UNIQUE (watch_id, bar_time)
 );
 CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY, value TEXT);
+CREATE TABLE IF NOT EXISTS notifications (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    created INTEGER NOT NULL,
+    kind TEXT NOT NULL,               -- signal / price_alert / edge / system
+    level TEXT NOT NULL DEFAULT 'info',   -- info / warn / error
+    title TEXT NOT NULL,
+    body TEXT,
+    symbol TEXT, tf TEXT, ref_id INTEGER,
+    link TEXT,                        -- JSON: where the notification leads in the app
+    read INTEGER NOT NULL DEFAULT 0
+);
 CREATE TABLE IF NOT EXISTS price_alerts (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     created INTEGER NOT NULL,
@@ -226,4 +237,48 @@ def update_price_alert(aid: int, **fields) -> None:
         return
     with _lock:
         _conn.execute(f"UPDATE price_alerts SET {', '.join(f'{k}=?' for k in fields)} WHERE id=?", (*fields.values(), aid))
+        _conn.commit()
+
+
+# ------------------------------------------------------------------ notifications (in-app inbox)
+def add_notification(kind: str, title: str, body: str | None = None, symbol: str | None = None, tf: str | None = None,
+                     ref_id: int | None = None, link: dict | None = None, level: str = "info") -> int:
+    with _lock:
+        cur = _conn.execute("INSERT INTO notifications (created,kind,level,title,body,symbol,tf,ref_id,link)"
+                            " VALUES (?,?,?,?,?,?,?,?,?)",
+                            (int(time.time()), kind, level, title, body, symbol, tf, ref_id,
+                             json.dumps(link) if link else None))
+        _conn.commit()
+        return cur.lastrowid
+
+
+def list_notifications(kind: str | None = None, unread_only: bool = False, before_id: int | None = None,
+                       since_id: int | None = None, limit: int = 100) -> list[dict]:
+    q, args = "SELECT * FROM notifications WHERE 1=1", []
+    if kind:
+        q += " AND kind=?"; args.append(kind)
+    if unread_only:
+        q += " AND read=0"
+    if before_id:
+        q += " AND id<?"; args.append(before_id)
+    if since_id:
+        q += " AND id>?"; args.append(since_id)
+    q += " ORDER BY id DESC LIMIT ?"; args.append(limit)
+    with _lock:
+        return [_row(r, ("link",)) for r in _conn.execute(q, args).fetchall()]
+
+
+def notification_counts() -> dict:
+    with _lock:
+        rows = _conn.execute("SELECT kind, COUNT(*) n, SUM(read=0) unread FROM notifications GROUP BY kind").fetchall()
+    by = {r["kind"]: {"total": r["n"], "unread": r["unread"] or 0} for r in rows}
+    return {"unread": sum(v["unread"] for v in by.values()), "by_kind": by}
+
+
+def mark_notifications_read(ids: list[int] | None = None, read: bool = True) -> None:
+    with _lock:
+        if ids is None:
+            _conn.execute("UPDATE notifications SET read=?", (int(read),))
+        elif ids:
+            _conn.execute(f"UPDATE notifications SET read=? WHERE id IN ({','.join('?' * len(ids))})", (int(read), *ids))
         _conn.commit()

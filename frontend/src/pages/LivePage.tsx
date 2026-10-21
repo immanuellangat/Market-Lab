@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react'
-import { live, type ExitOption, type ExitProfiles, type LiveStatus, type Signal, type TelegramCfg, type Watch } from '../api'
+import { live, type ExitOption, type ExitProfiles, type LiveStatus, type Signal, type Watch } from '../api'
 import { notifyPermission, requestNotify } from '../alerts'
 import RiskCalc from '../RiskCalc'
 import { fmt, useApp } from '../state'
@@ -19,6 +19,7 @@ export default function LivePage() {
   const [err, setErr] = useState<string | null>(null)
   const [filter, setFilter] = useState<'all' | 'open' | 'closed'>('all')
   const [perm, setPerm] = useState(notifyPermission())
+  const { setPage } = useApp()
   const [busy, setBusy] = useState<string | null>(null)
 
   const refresh = useCallback(async () => {
@@ -59,6 +60,7 @@ export default function LivePage() {
             <button className="btn sm primary" onClick={() => requestNotify().then(p => setPerm(p as NotificationPermission))}>Enable desktop alerts</button>
           )}
           {perm === 'granted' && <span className="chip accent">desktop alerts on</span>}
+          <button className="btn sm ghost" title="Telegram and desktop alert settings" onClick={() => setPage('settings')}>Alert settings</button>
         </div>
         {st && !st.mt5_ok && st.mt5_error && <div className="panel-body small error" style={{ margin: '0 14px 12px' }}>{st.mt5_error}</div>}
       </div>
@@ -86,7 +88,6 @@ export default function LivePage() {
 
         <div className="side" style={{ overflow: 'visible' }}>
           <WatchlistPanel watches={watches} busy={busy} act={act} />
-          <TelegramPanel />
           {st && st.log.length > 0 && (
             <div className="panel">
               <div className="panel-head"><h3>Activity</h3></div>
@@ -316,51 +317,6 @@ function WatchlistPanel({ watches, busy, act }: { watches: Watch[]; busy: string
             </div>
           )
         })}
-      </div>
-    </div>
-  )
-}
-
-function TelegramPanel() {
-  const [cfg, setCfg] = useState<TelegramCfg | null>(null)
-  const [token, setToken] = useState('')
-  const [msg, setMsg] = useState<{ ok: boolean; text: string } | null>(null)
-  const [open, setOpen] = useState(false)
-  useEffect(() => { live.telegram().then(setCfg).catch(() => {}) }, [])
-  const run = async (f: () => Promise<TelegramCfg | unknown>, ok: string) => {
-    setMsg(null)
-    try { const r = await f(); if (r && typeof r === 'object' && 'configured' in r) setCfg(r as TelegramCfg); setMsg({ ok: true, text: ok }) }
-    catch (e) { setMsg({ ok: false, text: (e as Error).message }) }
-  }
-  return (
-    <div className="panel">
-      <div className="panel-head">
-        <h3>Phone alerts (Telegram)</h3>
-        <span className={`chip ${cfg?.configured ? 'bull' : ''}`}>{cfg?.configured ? 'connected' : 'not set up'}</span>
-      </div>
-      <div className="panel-body" style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-        {!open && <button className="btn sm" onClick={() => setOpen(true)}>{cfg?.configured ? 'Settings' : 'Set up'}</button>}
-        {open && (
-          <>
-            <ol className="small muted" style={{ margin: 0, paddingLeft: 18, lineHeight: 1.6 }}>
-              <li>In Telegram, open <b>@BotFather</b>, send <code>/newbot</code>, choose a name. It replies with a <b>token</b>.</li>
-              <li>Paste the token below and save.</li>
-              <li>Open your new bot in Telegram and press <b>Start</b> (or send it any message).</li>
-              <li>Click <b>Detect chat</b>, then <b>Send test</b>.</li>
-            </ol>
-            <div className="row">
-              <input type="text" className="grow" placeholder={cfg?.has_token ? `saved (${cfg.token_hint})` : '123456:ABC-DEF…'} value={token} onChange={e => setToken(e.target.value)} />
-              <button className="btn sm" disabled={!token} onClick={() => run(() => live.setTelegram({ token }), 'Token saved.').then(() => setToken(''))}>Save</button>
-            </div>
-            <div className="row">
-              <button className="btn sm" disabled={!cfg?.has_token} onClick={() => run(() => live.detectTelegram(), 'Chat found.')}>Detect chat</button>
-              <button className="btn sm" disabled={!cfg?.configured} onClick={() => run(() => live.testTelegram(), 'Test message sent — check your phone.')}>Send test</button>
-              {cfg?.chat_id && <span className="small faint num">chat {cfg.chat_id}</span>}
-            </div>
-            <span className="small faint">The token is stored only on this PC.</span>
-          </>
-        )}
-        {msg && <div className={`small ${msg.ok ? 'pos' : 'neg'}`}>{msg.text}</div>}
       </div>
     </div>
   )

@@ -139,6 +139,16 @@ with the other watches (10-20% time together, weekly corr ~0). Without the CRT/S
    "#rank · Edge now X (was Y) · reason". Forward verdicts cached in setting `scoreboard_verdicts`, rebuilt in a
    background thread every 12 h (`LiveService._refresh_scoreboard`, ~1.5 min, server is slower meanwhile).
    First order: #21 #23 #7 #6 #8 #22 #20 #18 #19, then #17 (weakening: +0.02R vs +1.37R), #16 paused.
+2i. DONE 2026-10-21: NOTIFICATIONS PAGE (sidebar "Notifications" with unread badge, `pages/NotificationsPage.tsx`,
+   table `notifications`, `GET /api/live/notifications`, `/notifications/count`, `POST /notifications/read`).
+   Sources: every signal (`LiveService._inbox_signal`, LATE ones level warn), fired price alerts, edge changes
+   (`live/edge.py` check_changes every 60 s: tier healthy/weakening/broken moves; first run only records in setting
+   `edge_tiers`; Telegram for drops only), MT5 unreachable >= 5 min (+ Telegram) and restored. Edge ranking moved
+   from live_routes to `live/edge.py` (ranked()). MT5 outages are detected by a separate WATCHDOG thread
+   (`LiveService._watchdog`, every 30 s on `_mt5_last_ok`): on 2026-10-21 an MT5 "Authorization failed" made
+   `source.connect()` hang and froze the live loop for 76 min, so in-loop detection never fired.
+2j. DONE 2026-10-21: sidebar "Settings" page (`pages/SettingsPage.tsx`): Telegram setup moved there from Live signals
+   (Live page header has an "Alert settings" link) + desktop-notification permission.
 3. Optional: show recently filled zones (last ~50 candles) by default on the chart.
 4. DONE 2026-10-07: "View on chart" for watched setups (Live page) and discovered patterns (library row + pattern page).
    `/api/setup_view` -> checklist (met/not, price level where one exists via `_LEVEL_OF`/`_PD_FRACTION` in routes.py)

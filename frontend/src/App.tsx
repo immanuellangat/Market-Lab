@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 import { priceAlertTitle, signalTitle, usePriceAlertToasts, useSignalAlerts } from './alerts'
 import ChartPage from './pages/ChartPage'
 import DataPage from './pages/DataPage'
@@ -7,6 +7,9 @@ import ResearchPage from './pages/ResearchPage'
 import PatternsPage from './pages/PatternsPage'
 import PortfolioPage from './pages/PortfolioPage'
 import ForwardPage from './pages/ForwardPage'
+import NotificationsPage from './pages/NotificationsPage'
+import SettingsPage from './pages/SettingsPage'
+import { live } from './api'
 import { AppProvider, fmt, useApp, type Page } from './state'
 
 const ICONS: Record<Page, string> = {
@@ -16,6 +19,8 @@ const ICONS: Record<Page, string> = {
   scanner: 'M12 12m-8 0a8 8 0 1 0 16 0a8 8 0 1 0-16 0M12 12l5-5M12 4v2',
   portfolio: 'M3 17l6-6 4 4 8-8M15 7h6v6',
   forward: 'M4 12h12M12 6l6 6-6 6M4 5v14',
+  notifications: 'M6 16V11a6 6 0 1 1 12 0v5l2 2H4zM10 20a2 2 0 0 0 4 0',
+  settings: 'M12 15a3 3 0 1 0 0-6 3 3 0 0 0 0 6zM19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z',
   data: 'M4 6c0-1.7 3.6-3 8-3s8 1.3 8 3-3.6 3-8 3-8-1.3-8-3zM4 6v12c0 1.7 3.6 3 8 3s8-1.3 8-3V6M4 12c0 1.7 3.6 3 8 3s8-1.3 8-3',
 }
 const NAV: { id: Page; label: string; tag?: string }[] = [
@@ -25,13 +30,24 @@ const NAV: { id: Page; label: string; tag?: string }[] = [
   { id: 'patterns', label: 'Discovered patterns' },
   { id: 'forward', label: 'Forward tests' },
   { id: 'portfolio', label: 'Portfolio' },
+  { id: 'notifications', label: 'Notifications' },
   { id: 'data', label: 'Data' },
+  { id: 'settings', label: 'Settings' },
 ]
 
 function Shell() {
   const { page, setPage, metaError } = useApp()
   const { toasts, dismiss } = useSignalAlerts()
   const { paToasts, dismissPa } = usePriceAlertToasts()
+  // unread notifications badge (the page itself also reports its count when it changes)
+  const [unread, setUnread] = useState(0)
+  const onCount = useCallback((n: number) => setUnread(n), [])
+  useEffect(() => {
+    const poll = () => live.notificationCount().then(c => setUnread(c.unread)).catch(() => {})
+    poll()
+    const h = setInterval(poll, 15000)
+    return () => clearInterval(h)
+  }, [])
   const [theme, setTheme] = useState(() => { try { return localStorage.getItem('theme') ?? 'dark' } catch { return 'dark' } })
   useEffect(() => {
     document.documentElement.dataset.theme = theme
@@ -49,6 +65,7 @@ function Shell() {
           <button key={n.id} className={`nav-item ${page === n.id ? 'active' : ''}`} onClick={() => setPage(n.id)}>
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><path d={ICONS[n.id]} /></svg>
             {n.label}{n.tag && <span className="nav-tag">{n.tag}</span>}
+            {n.id === 'notifications' && unread > 0 && <span className="nav-badge" aria-label={`${unread} unread`}>{unread > 99 ? '99+' : unread}</span>}
           </button>
         ))}
         <div className="nav-foot">
@@ -64,7 +81,9 @@ function Shell() {
         {page === 'patterns' && <PatternsPage theme={theme} />}
         {page === 'portfolio' && <PortfolioPage theme={theme} />}
         {page === 'forward' && <ForwardPage />}
+        {page === 'notifications' && <NotificationsPage onCount={onCount} />}
         {page === 'data' && <DataPage />}
+        {page === 'settings' && <SettingsPage />}
       </main>
       <div className="toasts">
         {paToasts.map(a => (
