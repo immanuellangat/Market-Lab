@@ -21,7 +21,13 @@ Local price-action research platform (see README.md for features and layout).
   2h late, live scans 2h behind, chart countdown "closes in 126:36" on M15) and other wrong offsets in Oct; all 30
   bar files were re-downloaded/re-stamped (0 mismatches vs MT5 afterwards; ~6% of bars moved 1h = the DST weeks of
   every year). Backup of the old bars + live.db: `%LOCALAPPDATA%\MarketLab\backup_2026-11-16_before_clock_fix`.
-  Stored research results (pattern library, studies, portfolio_last) were computed on the old stamps and NOT re-run.
+  Re-run on the corrected bars the same day: stats of all 11 watches + portfolio (1% risk: all history CAGR 48% /
+  max DD 10%; unseen CAGR 53% / max DD 9%, won 60%, +0.29R/trade, 12 trades/month) — changes were small, except
+  #20 XAUUSD SMC unseen +0.35R -> +0.08R (11 trades) and #18 US100 CRT +0.35R -> +0.26R. The pattern library and the
+  strategy/zone studies were computed on the old stamps and NOT re-run (user agreed: not worth it).
+  Fixed and pushed in 9ed5e3a, which also un-ignored `backend/app/data/` (`.gitignore` had `data/`, now `/data/`).
+  Watch #7 (XAUUSD H4 long) had 0 forward signals in 41 days: not a bug — gold's D1 EMA trend was down and D1
+  volatility not high the whole time; 501 of its 700 historical hits are from the 2024-25 gold bull run.
 - Shortcuts: Desktop / Start menu / Startup "Market Lab.lnk" → `start.bat` (opens Chrome `--app` window); MT5 also in Startup.
 - GitHub: https://github.com/immanuellangat/Market-Lab (HTTPS remote; commit as `immanuellangat <immanuellangat9557@gmail.com>`).
   Only commit/push when the user asks. Everything up to commit 5484017 (2026-10-21, notifications, settings page, MT5 watchdog) is pushed.
