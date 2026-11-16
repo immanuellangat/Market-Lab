@@ -68,7 +68,7 @@ as #16 (= old #1, paused) and #17/#18 (= #9/#10), #19/#20 (= #11/#12). IDs below
 #9 EURUSD H4 + #10 US100 H4: CRT "close|full" + d1_bias + pd_zone + big_range, both directions — FORWARD TEST, flagged
 "unproven" (grade C per market; chosen after seeing OOS, so not validated). Strategy watches: conditions=["strategy:crt"],
 plan="crt|H4|close|full|<filters>", handled by `strategies/live.py` + `LiveService._scan_strategy` (fixed stop/target levels).
-#11 EURUSD H1 + #12 XAUUSD H1: SMC "smc|H1|smc_any|r2|bias2,htf_pd,killzone" (sweep -> CHoCH/MSS -> FVG/OB retest,
+#11 EURUSD H1 + #12 XAUUSD H1 (= #20, PAUSED 2026-11-16: unseen +0.08R on corrected data, 2 forward losses): SMC "smc|H1|smc_any|r2|bias2,htf_pd,killzone" (sweep -> CHoCH/MSS -> FVG/OB retest,
 D1 structure agrees, H4 discount/premium, killzone; struct stop, 2R) — FORWARD TEST, "unproven" (pooled OOS +0.08R, q=1).
 #21 BTCUSD H1 long (pattern 2563) · #22 EURUSD H1 short (2779) · #23 GBPUSD H1 long (2910): high-win-rate discovery
 (2ATR/1R), grade A, unseen wins 67/68/76%, +0.39/+0.40/+0.50R — added 2026-10-18 as forward tests (in the name).
