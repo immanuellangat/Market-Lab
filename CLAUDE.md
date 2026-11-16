@@ -6,13 +6,22 @@ Local price-action research platform (see README.md for features and layout).
 - Project lives in `C:\Projects\Market Lab` (moved out of OneDrive on 2026-10-06; the old
   `OneDrive\Desktop\work\ANALYSIS TOOL` copy is obsolete and may be deleted).
 - Python venv: `.venv\Scripts\python.exe` (run backend commands from `backend\`).
-  Tests: `..\.venv\Scripts\python -m pytest tests` (15 tests, all passing).
+  Tests: `..\.venv\Scripts\python -m pytest tests` (19 tests, all passing).
 - Frontend: `frontend\` (Vite + React + TS + lightweight-charts). Build: `npm run build`; the backend serves `frontend\dist`.
 - Server: port **8777** (`start.bat`; ports 8000/8765 are taken by the user's own `python -m http.server`).
   Restart = kill the process listening on 8777, then run `start.bat` or `.venv\Scripts\python -m uvicorn app.main:app --host 127.0.0.1 --port 8777` from `backend\`.
 - Data/caches/SQLite (signals, watchlist, patterns, Telegram token) live in `%LOCALAPPDATA%\MarketLab\data` — NOT in the repo.
 - Broker: JustMarkets via MetaTrader 5 (symbols `EURUSD.m`, `GBPUSD.m`, `USDJPY.m`, `XAUUSD.m`, `BTCUSD.m`, `US100.std`).
-  Server clock = New York + 7h; MT5 request bounds are in server time (fetch extends end by +1 day).
+  Server clock = Eastern European time (UTC+2, UTC+3 in EU summer time) — NOT New York + 7h: the two differ by 1h
+  in the 3-4 weeks/year between the EU and US daylight-saving changes (checked on weekly FX opens 2020-10..2026:
+  EET right in 20 of 22 such weeks). `mt5_source` time_mode "eet" | "ny+7" | "fixed" is decided once per process from
+  the H1 history (`clock_rule_from_history`), never from one tick (a stale tick looks like another offset).
+  MT5 request bounds are in server time (fetch extends end by +1 day).
+  CLOCK FIX 2026-11-16: the old tick-based detection had fallen to "fixed" with offset 0 (bars from 13 Nov stamped
+  2h late, live scans 2h behind, chart countdown "closes in 126:36" on M15) and other wrong offsets in Oct; all 30
+  bar files were re-downloaded/re-stamped (0 mismatches vs MT5 afterwards; ~6% of bars moved 1h = the DST weeks of
+  every year). Backup of the old bars + live.db: `%LOCALAPPDATA%\MarketLab\backup_2026-11-16_before_clock_fix`.
+  Stored research results (pattern library, studies, portfolio_last) were computed on the old stamps and NOT re-run.
 - Shortcuts: Desktop / Start menu / Startup "Market Lab.lnk" → `start.bat` (opens Chrome `--app` window); MT5 also in Startup.
 - GitHub: https://github.com/immanuellangat/Market-Lab (HTTPS remote; commit as `immanuellangat <immanuellangat9557@gmail.com>`).
   Only commit/push when the user asks. Everything up to commit 5484017 (2026-10-21, notifications, settings page, MT5 watchdog) is pushed.
